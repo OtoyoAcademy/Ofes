@@ -183,17 +183,32 @@ function renderProgram(){
  else text+=active.length?`<br>ただいま開催中：${active.map(p=>esc(`${p.grade?`${p.grade} `:''}${p.group?`${p.group} `:''}${p.title}`)).join('・')}`:'<br>現在開催中のプログラムはありません。';
  byId('timeStatus').innerHTML=text;
  const units=[];
- for(const p of orderedPrograms().filter(p=>!SESSION_IDS.includes(p.session))){const pt=programTimes(p);units.push({type:'single',start:pt.start,p});}
+ // 午前セッションは時間帯ごとにまとめる。午後の有志発表も1つの折りたたみグループにまとめる。
+ for(const p of orderedPrograms().filter(p=>!SESSION_IDS.includes(p.session) && p.session!=='afternoon')){const pt=programTimes(p);units.push({type:'single',start:pt.start,p});}
  for(const sid of SESSION_IDS){const ps=orderedPrograms().filter(p=>p.session===sid);if(ps.length){const d=sessionDef(sid);units.push({type:'session',start:d.start,sid,programs:ps});}}
- units.sort((a,b)=>timeNum(a.start)-timeNum(b.start)||String(a.sid||a.p?.id||'').localeCompare(String(b.sid||b.p?.id||'')));
+ const afternoonPrograms=orderedPrograms().filter(p=>p.session==='afternoon');
+ if(afternoonPrograms.length){
+  const starts=afternoonPrograms.map(p=>timeNum(programTimes(p).start));
+  units.push({type:'afternoon-group',start:programTimes(afternoonPrograms[0]).start,programs:afternoonPrograms,groupStart:Math.min(...starts)});
+ }
+ units.sort((a,b)=>timeNum(a.start)-timeNum(b.start)||String(a.sid||a.p?.id||a.type||'').localeCompare(String(b.sid||b.p?.id||b.type||'')));
  byId('programList').innerHTML=units.map(unit=>{
   if(unit.type==='session'){
    const d=sessionDef(unit.sid),st=programStatus(unit.programs[0]);
    const items=unit.programs.slice().sort((a,b)=>String(roomLabel(a)).localeCompare(String(roomLabel(b)))).map(p=>`<div class="session-program-item"><div class="session-program-main"><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong><div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`).join('');
    return `<details class="program-session-group ${st.key==='live'?'on':''}" ${st.key==='live'?'open':''}><summary class="program-session-summary"><span class="time">${esc(d.start)}</span><span class="session-summary-main"><strong>${esc(d.label)}</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(d.start)}〜${esc(d.end)}　${unit.programs.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
   }
+  if(unit.type==='afternoon-group'){
+   const ps=unit.programs.slice().sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||String(a.id).localeCompare(String(b.id)));
+   const first=programTimes(ps[0]),last=programTimes(ps[ps.length-1]);
+   const anyLive=ps.some(p=>programStatus(p).key==='live');
+   const allEnded=ps.every(p=>programStatus(p).key==='ended');
+   const st=anyLive?{key:'live',label:'発表中'}:(allEnded?{key:'ended',label:'終了しました'}:{key:'upcoming',label:'発表予定'});
+   const items=ps.map(p=>{const pt=programTimes(p),pst=programStatus(p);return `<div class="session-program-item"><div class="session-program-main"><div class="afternoon-program-time">${esc(pt.start)}〜${esc(pt.end)} <span class="program-status status-${pst.key}">${pst.label}</span></div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong><div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`}).join('');
+   return `<details class="program-session-group afternoon-program-group ${st.key==='live'?'on':''}" ${st.key==='live'?'open':''}><summary class="program-session-summary"><span class="time">${esc(first.start)}</span><span class="session-summary-main"><strong>午後の有志発表</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(first.start)}〜${esc(last.end)}　${ps.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
+  }
   const p=unit.p,pt=programTimes(p),st=programStatus(p);
-  return `<div class="program-row ${st.key==='live'?'on':''}"><div class="time">${esc(pt.start)}</div><div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong><span class="program-status status-${st.key}">${st.label}</span><div class="where">${esc(sessionLabel(p.session))}　${esc(pt.start)}〜${esc(pt.end)}　${esc(roomLabel(p))} <button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>${p.session==='afternoon'?reactionsHtml(p):''}</div></div>`;
+  return `<div class="program-row ${st.key==='live'?'on':''}"><div class="time">${esc(pt.start)}</div><div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong><span class="program-status status-${st.key}">${st.label}</span><div class="where">${esc(sessionLabel(p.session))}　${esc(pt.start)}〜${esc(pt.end)}　${esc(roomLabel(p))} <button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div></div></div>`;
  }).join('');
  $$('[data-see]').forEach(b=>b.onclick=()=>{
   if(!b.dataset.see)return;
