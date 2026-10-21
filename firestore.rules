@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.uid == 'XxawqhAFz0SgpzYQbMKMdWQDBNx2';
+    }
+
+    function isSelf(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // 公開するのはプログラム・会場情報・受付期限など、来場者向けデータのみ。
+    match /published/site {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 旧接続診断（管理者だけが読み取り可能）。
+    match /ofes_connection_tests/{documentId} {
+      allow get: if isAdmin();
+      allow list, create, update, delete: if false;
+    }
+
+    // 来場者の選択は、イベント日×発表×認証UIDごとに1件。
+    match /reactionEvents/{eventDate}/programs/{programId}/votes/{voterUid} {
+      function sitePath() {
+        return /databases/$(database)/documents/published/site;
+      }
+      function isAccepting() {
+        return exists(sitePath())
+          && get(sitePath()).data.eventDate == eventDate
+          && get(sitePath()).data.reactionDeadlineAt is timestamp
+          && request.time < get(sitePath()).data.reactionDeadlineAt
+          && programId in get(sitePath()).data.programIds;
+      }
+      function validReaction() {
+        return request.resource.data.keys().hasOnly(['selected', 'updatedAt', 'version'])
+          && request.resource.data.keys().hasAll(['selected', 'updatedAt', 'version'])
+          && request.resource.data.version == 1
+          && request.resource.data.selected is list
+          && request.resource.data.selected.size() >= 1
+          && request.resource.data.selected.size() <= 5
+          && request.resource.data.selected.hasOnly(['good', 'aha', 'amazing', 'fun', 'cheer'])
+          && request.resource.data.updatedAt == request.time;
+      }
+      // 本人は自分の分だけ読める。管理者は集計・全クリア・復元のため全件を扱える。
+      allow get: if isAdmin() || isSelf(voterUid);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() || (isSelf(voterUid) && isAccepting() && validReaction());
+      allow delete: if isAdmin() || (isSelf(voterUid) && isAccepting());
+    }
+
+    // 全クリア直前に作るリアクション復元ポイント。管理者以外は一切アクセス不可。
+    match /reactionBackups/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Firestore公開直前に作る公開データの復元ポイント。管理者以外は一切アクセス不可。
+    match /publicationBackups/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
