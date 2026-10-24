@@ -752,7 +752,38 @@ byId('printNotice').onclick=()=>{
 };
 
 byId('exportJson').onclick=()=>{const blob=new Blob([JSON.stringify({version:14,data:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`OFES_${state.year}_backup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);};
-byId('importJson').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{const parsed=JSON.parse(await f.text());const next=validData(parsed.data||parsed);if(!confirm('現在の設定を読み込んだデータで置き換えますか？'))return;state=next;draftState=state;persist();adminMap='campus';editId='';editDraft=null;adminProgramVenue='';renderAdmin();renderPublic();toast('読み込みました')}catch(error){console.error(error);alert('JSON形式を確認してください。')}finally{e.target.value=''}};
+byId('importJson').onchange=async e=>{
+ const f=e.target.files?.[0];if(!f)return;
+ const status=byId('importJsonStatus');
+ try{
+  const parsed=JSON.parse(await f.text());
+  const next=validData(parsed.data||parsed);
+  if(!confirm('現在の設定を読み込んだデータで置き換えますか？')){
+   if(status){status.className='cloud-state warning';status.textContent='JSONの読み込みをキャンセルしました。現在の下書きは変更していません。';}
+   return;
+  }
+  // 読み込みデータを「編集用の下書き」として明示的に採用する。
+  draftState=clone(next);
+  state=draftState;
+  editorActive=true;
+  hasLegacyDraft=true;
+  if(!persist())throw Error('ブラウザへの保存に失敗しました');
+  adminMap='campus';editId='';editDraft=null;adminProgramVenue='';
+  renderAdmin();renderPublic();
+  if(status){
+   status.className='cloud-state';
+   status.textContent=`読み込み完了：${f.name} ／ 会場${state.zones.length}件 ／ プログラム${state.programs.length}件。内容を確認後、「Supabaseへ公開」を押してください。`;
+  }
+  toast(`JSONを読み込みました（会場${state.zones.length}件・プログラム${state.programs.length}件）`);
+ }catch(error){
+  console.error(error);
+  if(status){status.className='cloud-state warning';status.textContent=`読み込みに失敗しました：${f.name}。JSON形式またはデータ内容を確認してください。`;}
+  alert('JSON形式またはデータ内容を確認してください。');
+ }finally{
+  // 同じJSONを再選択して検証できるよう、ファイル入力だけをリセットする。
+  e.target.value='';
+ }
+};
 byId('resetAll').onclick=()=>{if(!confirm('登録した会場・プログラムなどの試作データをすべて初期化しますか？'))return;state=clone(DEFAULT_DATA);draftState=state;persist();adminMap='campus';editId='';editDraft=null;adminProgramVenue='';renderAdmin();renderPublic();toast('初期化しました')};
 renderPublic();readStampFromUrl();
 // 外部SDKが読み込めない場合も、接続タブで理由が分かるようにする。

@@ -1,4 +1,4 @@
-# OFES Ver.1.20 — Supabase移行版
+# OFES Ver.1.21 — Supabase移行版
 
 Firebase / Firestore 依存を外し、学校用GitHub Pages + Supabase で動作するようにした移行版です。
 
@@ -83,11 +83,11 @@ export const supabaseConfig = {
 
 **secret key / service_role key は絶対にGitHubへ置かないでください。**
 
-### 6. GitHub PagesへVer.1.20をアップロード
+### 6. GitHub PagesへVer.1.21をアップロード
 
 `OFES_Ver1.20_Supabase` フォルダの「中身」を、学校GitHub `OtoyoAcademy / Ofes` のルートへ上書きします。
 
-Firebase用の以下のファイルはVer.1.20には不要です。
+Firebase用の以下のファイルはVer.1.21には不要です。
 
 - `firebase-config.js`
 - `firebase-bridge.js`
@@ -132,10 +132,10 @@ Firebase用の以下のファイルはVer.1.20には不要です。
 
 ## Firebase側のデータについて
 
-Ver.1.20はFirebaseへアクセスしません。
+Ver.1.21はFirebaseへアクセスしません。
 ただし、移行完了が確認できるまではFirebaseプロジェクトを削除しないでください。
 
-本番前のリアクションはテストデータのため、Ver.1.20ではFirebase上のリアクション履歴を自動移行しません。
+本番前のリアクションはテストデータのため、Ver.1.21ではFirebase上のリアクション履歴を自動移行しません。
 会場・プログラム・年度設定は設定JSONから移行します。
 
 ## Supabase Free運用メモ
@@ -155,3 +155,10 @@ OFESは年1回の利用なので、Freeプロジェクトが長期間低活動�
 - `manifest.webmanifest` — ホーム画面アプリ設定
 - `assets/` — ロゴ、アイコン、学校用URLのQRコード
 
+
+
+## Ver.1.21 修正
+
+- JSON読み込み後に、ファイル名・会場件数・プログラム件数を「データ保存」画面へ常時表示します。
+- JSONを読み込んだデータを編集用下書きとして明示的に切り替え、ブラウザ保存後に管理画面・来場者画面へ再描画します。
+- ファイル入力欄は同じJSONを再選択できるよう読み込み後にリセットしますが、読み込み結果は画面に残ります。

@@ -75,7 +75,7 @@
 <div id="loginModal" class="modal" hidden><div class="modal-inner"><h2>管理画面を開く</h2><p class="muted">このパスワードはブラウザ内の試作設定を編集するための簡易ロックです。Supabaseの書き込み権限を与えるものではありません。</p><form id="loginForm"><label>管理者パスワード<input type="password" id="adminPassword" required autocomplete="current-password"></label><p id="loginError" class="error"></p><div class="modal-actions"><button type="button" class="btn light" id="cancelLogin">キャンセル</button><button type="submit" class="btn primary">ログイン</button></div></form></div></div>
 
 <section id="adminPanel" class="admin-panel" hidden>
-  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.20 · Supabase移行版</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
+  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.21 · Supabase移行版</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
   <nav class="admin-tabs" id="adminNav" aria-label="管理項目"><button data-admin="firebase" class="active">🔑 Supabase接続</button><button data-admin="venues">会場・配置図</button><button data-admin="program">プログラム</button><button data-admin="reactions">リアクション集計</button><button data-admin="basic">年度・時刻テスト</button><button data-admin="notice">お知らせPDF</button><button data-admin="data">データ保存</button></nav>
 
   <div class="admin-page active" id="admin-firebase">
@@ -233,6 +233,7 @@
       <p>ブラウザや端末を変更する前に、設定JSONを保存してください。古いバージョンで登録した教室データも引き継げます。</p>
       <button id="exportJson" class="btn primary">下書きの設定JSONを書き出す</button>
       <label>設定JSONを読み込む<input type="file" id="importJson" accept=".json,application/json"></label>
+      <p id="importJsonStatus" class="cloud-state" role="status">まだJSONを読み込んでいません。</p>
       <button id="resetAll" class="btn danger">このブラウザの下書きを初期化</button>
       <p class="caption">JSONの読み込みや下書きの初期化ではSupabaseの公開データは変更されません。公開する場合は明示的に「Supabaseへ公開」を押してください。</p>
     </div>
