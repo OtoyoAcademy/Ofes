@@ -11,9 +11,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="OFES">
-  <link rel="stylesheet" href="style.css?v=118">
-  <script defer src="app.js?v=118"></script>
-  <script type="module" src="firebase-bridge.js?v=118"></script>
+  <link rel="stylesheet" href="style.css?v=120">
+  <script defer src="app.js?v=120"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script type="module" src="supabase-bridge.js?v=120"></script>
 </head>
 <body>
 <header class="hero">
@@ -71,45 +72,49 @@
 <div class="admin-entry"><button type="button" id="openAdmin">⚙ 管理者</button><span>来場者はログイン不要</span></div>
 </main>
 
-<div id="loginModal" class="modal" hidden><div class="modal-inner"><h2>管理画面を開く</h2><p class="muted">このパスワードはブラウザ内の試作設定を編集するための簡易ロックです。Firebaseの権限を与えるものではありません。</p><form id="loginForm"><label>管理者パスワード<input type="password" id="adminPassword" required autocomplete="current-password"></label><p id="loginError" class="error"></p><div class="modal-actions"><button type="button" class="btn light" id="cancelLogin">キャンセル</button><button type="submit" class="btn primary">ログイン</button></div></form></div></div>
+<div id="loginModal" class="modal" hidden><div class="modal-inner"><h2>管理画面を開く</h2><p class="muted">このパスワードはブラウザ内の試作設定を編集するための簡易ロックです。Supabaseの書き込み権限を与えるものではありません。</p><form id="loginForm"><label>管理者パスワード<input type="password" id="adminPassword" required autocomplete="current-password"></label><p id="loginError" class="error"></p><div class="modal-actions"><button type="button" class="btn light" id="cancelLogin">キャンセル</button><button type="submit" class="btn primary">ログイン</button></div></form></div></div>
 
 <section id="adminPanel" class="admin-panel" hidden>
-  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.19 · セッション折りたたみ＋プログラムからリアクション</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
-  <nav class="admin-tabs" id="adminNav" aria-label="管理項目"><button data-admin="firebase" class="active">🔑 Firebase接続</button><button data-admin="venues">会場・配置図</button><button data-admin="program">プログラム</button><button data-admin="reactions">リアクション集計</button><button data-admin="basic">年度・時刻テスト</button><button data-admin="notice">お知らせPDF</button><button data-admin="data">データ保存</button></nav>
+  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.20 · Supabase移行版</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
+  <nav class="admin-tabs" id="adminNav" aria-label="管理項目"><button data-admin="firebase" class="active">🔑 Supabase接続</button><button data-admin="venues">会場・配置図</button><button data-admin="program">プログラム</button><button data-admin="reactions">リアクション集計</button><button data-admin="basic">年度・時刻テスト</button><button data-admin="notice">お知らせPDF</button><button data-admin="data">データ保存</button></nav>
 
   <div class="admin-page active" id="admin-firebase">
   <div class="editor-card firebase-setup">
-    <h3>Googleログイン・Firebase接続</h3>
-    <p class="muted">開発用プロジェクト <strong>ofes-dev</strong> に接続します。管理者Googleログイン後、「データ保存」からFirestoreへ公開できます。</p>
+    <h3>管理者ログイン・Supabase接続</h3>
+    <p class="muted">学校用GitHub PagesからSupabaseへ接続します。管理者はSupabase Authのメールアドレス＋パスワードでログインし、「データ保存」から公開します。</p>
     <div class="firebase-status-grid">
       <div class="firebase-status-item"><span>SDKの状態</span><strong id="firebaseSdkStatus" aria-live="polite">読み込み中…</strong></div>
-      <div class="firebase-status-item"><span>Googleログイン</span><strong id="firebaseAuthStatus" aria-live="polite">確認中…</strong></div>
-      <div class="firebase-status-item"><span>Firestore公開</span><strong id="firebaseCloudStatus">確認中…</strong></div>
+      <div class="firebase-status-item"><span>管理者認証</span><strong id="firebaseAuthStatus" aria-live="polite">確認中…</strong></div>
+      <div class="firebase-status-item"><span>Supabase公開</span><strong id="firebaseCloudStatus">確認中…</strong></div>
+    </div>
+    <div class="supabase-login-grid">
+      <label>管理者メールアドレス<input id="supabaseAdminEmail" type="email" autocomplete="username" placeholder="school@example.jp"></label>
+      <label>パスワード<input id="supabaseAdminPassword" type="password" autocomplete="current-password"></label>
     </div>
     <div class="row-actions">
-      <button type="button" class="btn primary" id="firebaseSignIn" disabled>Googleでログイン</button>
+      <button type="button" class="btn primary" id="firebaseSignIn" disabled>Supabaseへログイン</button>
       <button type="button" class="btn light" id="firebaseSignOut" hidden>ログアウト</button>
     </div>
-    <p id="firebaseAuthMessage" class="caption" role="status">Firebase SDKを読み込んでいます。</p>
+    <p id="firebaseAuthMessage" class="caption" role="status">Supabase SDKを読み込んでいます。</p>
     <div id="firebaseAccount" class="firebase-account" hidden>
-      <p><strong>ログイン中のGoogleアカウント</strong></p>
+      <p><strong>ログイン中の管理者アカウント</strong></p>
       <p id="firebaseUserEmail" class="firebase-value"></p>
-      <label>Firebase AuthenticationのUID（管理者登録に使用）
-        <input id="firebaseUserUid" type="text" readonly aria-label="Firebase UID">
+      <label>Supabase AuthのUID（管理者登録に使用）
+        <input id="firebaseUserUid" type="text" readonly aria-label="Supabase UID">
       </label>
       <button type="button" class="btn light" id="firebaseCopyUid">UIDをコピー</button>
       <p class="caption">UIDは管理者を特定するための識別子です。ログインしただけでは管理者の書き込み権限は付与されません。</p>
     </div>
     <hr class="subtle-line">
-    <h4>Firestore接続確認（任意）</h4>
-    <p class="muted">ログイン中の管理者によるFirestoreの読み取り権限を確認します。管理者UIDに読み取り権限が付いていれば、診断用データがなくても「読み取り成功」と表示されます。</p>
+    <h4>Supabase接続確認（任意）</h4>
+    <p class="muted">SupabaseのRLSで、このUIDがOFES管理者として登録されているか確認します。</p>
     <button type="button" class="btn light" id="firebaseReadTest" disabled>読み取りを確認する</button>
-    <p id="firebaseReadResult" class="caption" role="status">Googleでログインすると確認できます。</p>
+    <p id="firebaseReadResult" class="caption" role="status">管理者ログイン後に確認できます。</p>
   </div>
 </div>
 
   <div class="admin-page" id="admin-venues">
-    <div class="admin-intro"><b>使い方</b>　①図面を選ぶ → ②「新規会場」を押す → ③教室の枠をドラッグで囲む → ④会場名を入力して保存。既存会場の位置も指定し直せます。<p class="caption"><strong>重要：</strong>編集内容は一度このブラウザの「下書き」に保存されます。来場者へ反映するには「データ保存」タブの「Firestoreへ公開」を押してください。JSONバックアップも残せます。</p></div>
+    <div class="admin-intro"><b>使い方</b>　①図面を選ぶ → ②「新規会場」を押す → ③教室の枠をドラッグで囲む → ④会場名を入力して保存。既存会場の位置も指定し直せます。<p class="caption"><strong>重要：</strong>編集内容は一度このブラウザの「下書き」に保存されます。来場者へ反映するには「データ保存」タブの「Supabaseへ公開」を押してください。JSONバックアップも残せます。</p></div>
     <div class="admin-venue-layout">
       <div class="admin-canvas-col">
         <div class="admin-canvas-tools"><label>配置図を選択<select id="adminMapSelect"></select></label><div class="tool-buttons"><button id="newVenue" class="btn primary">＋ 新規会場</button><button id="redrawVenue" class="btn light">位置を指定し直す</button><button id="cancelDrawing" class="btn light">選択解除</button></div></div>
@@ -126,7 +131,7 @@
             <label>補足情報（任意）<input id="zoneNote" maxlength="100" placeholder="例：探究学習の展示"></label>
             <label>種類<select id="zoneKind"><option value="classroom">教室</option><option value="exhibit">展示場所</option><option value="hall">体育館・ホール</option><option value="building">建物</option><option value="parking">駐車場・入口</option><option value="other">その他</option></select></label>
             <div class="four-cols"><label>左位置 %<input id="zoneX" type="number" min="0" max="100" step="0.1"></label><label>上位置 %<input id="zoneY" type="number" min="0" max="100" step="0.1"></label><label>幅 %<input id="zoneW" type="number" min="0.1" max="100" step="0.1"></label><label>高さ %<input id="zoneH" type="number" min="0.1" max="100" step="0.1"></label></div>
-            <div class="row-actions"><button type="submit" class="btn primary">この会場を保存</button><button type="button" id="attachDemo" class="btn light">リアクション表示を試す</button><button type="button" id="deleteVenue" class="btn danger">削除</button></div><p class="caption reaction-test-note">発表をまだ登録していない会場でも、セッション①の仮発表でリアクションの見え方を試せます。本番で記録・集計するには「プログラム」でセッション・学年・発表内容を登録し、Firestoreへ公開してください。</p>
+            <div class="row-actions"><button type="submit" class="btn primary">この会場を保存</button><button type="button" id="attachDemo" class="btn light">リアクション表示を試す</button><button type="button" id="deleteVenue" class="btn danger">削除</button></div><p class="caption reaction-test-note">発表をまだ登録していない会場でも、セッション①の仮発表でリアクションの見え方を試せます。本番で記録・集計するには「プログラム」でセッション・学年・発表内容を登録し、Supabaseへ公開してください。</p>
           </form>
         </div>
         <div class="editor-card"><h3>この図に登録した会場</h3><div id="mapZoneList" class="venue-list"></div></div>
@@ -135,12 +140,12 @@
   </div>
 
   <div class="admin-page" id="admin-program">
-    <div class="admin-intro"><strong>入力は2段階です。</strong> ①セッション①〜④の時間帯を設定 → ②会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。同じ時間帯を会場ごとに繰り返し入力する必要はありません。変更はこのブラウザの下書きに保存され、「データ保存」からFirestoreへ公開すると来場者へ反映されます。</div>
+    <div class="admin-intro"><strong>入力は2段階です。</strong> ①セッション①〜④の時間帯を設定 → ②会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。同じ時間帯を会場ごとに繰り返し入力する必要はありません。変更はこのブラウザの下書きに保存され、「データ保存」からSupabaseへ公開すると来場者へ反映されます。</div>
     <div class="editor-card demo-data-card">
       <h3>デモデータで動きを確認</h3>
       <p class="muted">2025年度のおおとよ家フェスティバルの時間構成を参考に、登録済みの会場を使ってセッション①〜④（最大16発表）と午後のステージ発表を下書きに追加します。<strong>会場登録は変更しません。</strong>既存の本番プログラムも残したまま、デモ用プログラムだけを追加・削除できます。</p>
       <div class="row-actions"><button type="button" id="addDemoData" class="btn primary">デモデータを登録</button><button type="button" id="removeDemoData" class="btn light">デモデータを削除</button></div>
-      <p id="demoDataMessage" class="caption" role="status">登録直後、この端末では「会場案内」に実施場所が反映され、セッション①を選んだ状態で確認できます。別ブラウザやスマホで試す場合は「データ保存」→「Firestoreへ公開」を押してください。</p>
+      <p id="demoDataMessage" class="caption" role="status">登録直後、この端末では「会場案内」に実施場所が反映され、セッション①を選んだ状態で確認できます。別ブラウザやスマホで試す場合は「データ保存」→「Supabaseへ公開」を押してください。</p>
     </div>
     <div id="adminPrograms"></div>
   </div>
@@ -148,25 +153,25 @@
   <div class="admin-page" id="admin-reactions">
     <div class="editor-card reaction-batch-card">
       <h3>リアクションを一括集計</h3>
-      <p class="muted">午前・午後のリアクション対象発表を、発表グループごとにFirestoreから集計します。同じ学年の複数グループは別々に表示し、合同発表は該当する各学年のPDFページに掲載します。個々の投票者情報は表示しません。</p>
+      <p class="muted">午前・午後のリアクション対象発表を、発表グループごとにSupabaseから集計します。同じ学年の複数グループは別々に表示し、合同発表は該当する各学年のPDFページに掲載します。個々の投票者情報は表示しません。</p>
       <div class="row-actions"><button type="button" id="reactionStatsLoadAll" class="btn primary">全発表を一括集計</button><button type="button" id="reactionStatsPdfOverall" class="btn light" disabled>全体集計PDF</button><button type="button" id="reactionStatsPdfGrade" class="btn light" disabled>学年別フィードバックPDF</button></div>
-      <p id="reactionStatsAllMessage" class="caption" role="status">管理者Googleログイン後に集計できます。</p>
+      <p id="reactionStatsAllMessage" class="caption" role="status">管理者ログイン後に集計できます。</p>
       <div id="reactionStatsAllResult" class="reaction-all-result" hidden></div>
       <p class="caption">「全体集計PDF」は全発表グループを一覧で確認する教職員向けです。「学年別フィードバックPDF」は1つのPDFの中で1学年につき1ページに分け、児童・生徒向けの前向きなメッセージを添えます。どちらもリアクション欄はアイコンのみの細い列です。</p>
     </div>
     <div class="editor-card reaction-clear-card">
       <h3>リアクションを全クリア</h3>
-      <p class="muted">現在公開中の発表に保存されているリアクションをすべて削除します。<strong>削除の直前にFirestoreへ復元ポイントを自動保存し、保存に成功した場合だけクリアします。</strong></p>
+      <p class="muted">現在公開中の発表に保存されているリアクションをすべて削除します。<strong>削除の直前にSupabaseへ復元ポイントを自動保存し、保存に成功した場合だけクリアします。</strong></p>
       <div class="row-actions"><button type="button" id="reactionClearAll" class="btn danger">全リアクションをクリア</button><button type="button" id="reactionRestoreLatest" class="btn light">最新の復元ポイントから復元</button></div>
       <p id="reactionRestorePoint" class="caption">最新の復元ポイントを確認中…</p>
-      <p id="reactionClearMessage" class="caption" role="status">管理者Googleログイン後に操作できます。</p>
+      <p id="reactionClearMessage" class="caption" role="status">管理者ログイン後に操作できます。</p>
     </div>
     <div class="editor-card basic-card">
       <h3>個別の発表を確認</h3>
       <p class="muted">必要なときだけ、1つの発表を選んで詳しく確認できます。</p>
       <label>集計する発表<select id="reactionStatsProgram"><option value="">公開済みの発表を読み込み中…</option></select></label>
       <button type="button" id="reactionStatsLoad" class="btn primary">この発表の集計を表示</button>
-      <p id="reactionStatsMessage" class="caption" role="status">管理者Googleログイン後に確認できます。</p>
+      <p id="reactionStatsMessage" class="caption" role="status">管理者ログイン後に確認できます。</p>
       <div id="reactionStatsResult" class="reaction-stats-result" hidden></div>
       <button type="button" id="reactionStatsExport" class="btn light" disabled>表示中の集計をCSVで保存</button>
       <p class="caption">ランキング表示は行いません。来場者向け画面にも投票数は表示しません。</p>
@@ -180,7 +185,7 @@
       <label>開催日<input id="settingDate" type="date"></label>
       <label>スローガン<input id="settingSlogan" type="text" maxlength="80"></label>
       <label>リアクション受付終了（日本時間）<input id="reactionDeadline" type="datetime-local" step="60"></label>
-      <p class="caption">受付終了後は追加・押し直し・取り消しができません。端末の時計ではなくFirestore側の時刻でも受付期限を確認します。</p>
+      <p class="caption">受付終了後は追加・押し直し・取り消しができません。端末の時計ではなくSupabase側の時刻でも受付期限を確認します。</p>
       <button id="saveBasic" class="btn primary">年度・リアクション設定を保存</button>
     </div>
     <div class="editor-card basic-card">
@@ -191,7 +196,7 @@
       <input id="testSlider" type="range" min="480" max="930" step="1" aria-label="テスト時刻を動かす">
       <strong class="clock" id="testTimeText">09:25</strong>
       <div class="quick-buttons"><button data-quick="09:25" class="btn light">09:25</button><button data-quick="10:05" class="btn light">10:05</button><button data-quick="13:35" class="btn light">13:35</button></div>
-      <p class="caption">テスト日時はこのブラウザ専用です。Firestoreへは公開されず、来場者には実時刻で表示されます。</p>
+      <p class="caption">テスト日時はこのブラウザ専用です。Supabaseへは公開されず、来場者には実時刻で表示されます。</p>
     </div>
   </div>
 
@@ -209,19 +214,19 @@
   </div>
 
   <div class="admin-page" id="admin-data">
-    <div class="editor-card basic-card"><h3>Firestoreへ公開する</h3>
-      <p>教室・プログラム・年度の編集内容は、まず<strong>このブラウザの下書き</strong>に保存されます。確認が済んだら<strong>「Firestoreへ公開」</strong>を押してください。公開した内容は来場者の画面に共有されます。</p>
+    <div class="editor-card basic-card"><h3>Supabaseへ公開する</h3>
+      <p>教室・プログラム・年度の編集内容は、まず<strong>このブラウザの下書き</strong>に保存されます。確認が済んだら<strong>「Supabaseへ公開」</strong>を押してください。公開した内容は来場者の画面に共有されます。</p>
       <p class="cloud-state" id="firebasePublishSummary" role="status">公開データを確認中…</p>
-      <div class="row-actions"><button type="button" id="firebasePublish" class="btn primary" disabled>Firestoreへ公開</button><button type="button" id="firebaseLoadDraft" class="btn light" disabled>公開データを編集用に読み込む</button></div>
-      <p id="firebasePublishMessage" class="caption" role="status">管理者Googleログイン後に公開できます。</p>
-      <p class="caption"><strong>安全機能：</strong>2回目以降の公開では、現在のFirestore公開データを<strong>公開直前に自動で復元ポイントへ保存</strong>します。復元ポイントの保存に失敗した場合は、新しい内容を公開しません。</p>
+      <div class="row-actions"><button type="button" id="firebasePublish" class="btn primary" disabled>Supabaseへ公開</button><button type="button" id="firebaseLoadDraft" class="btn light" disabled>公開データを編集用に読み込む</button></div>
+      <p id="firebasePublishMessage" class="caption" role="status">管理者ログイン後に公開できます。</p>
+      <p class="caption"><strong>安全機能：</strong>2回目以降の公開では、現在のSupabase公開データを<strong>公開直前に自動で復元ポイントへ保存</strong>します。復元ポイントの保存に失敗した場合は、新しい内容を公開しません。</p>
       <p class="caption"><strong>注意：</strong>公開するのは年度・開催日・スローガン・会場・プログラム・リアクション受付期限です。管理者の<strong>テスト日時</strong>と、来場者の<strong>スタンプ取得状況</strong>は公開・上書きしません。「公開データを編集用に読み込む」は現在の下書きを置き換えるため、先にJSONバックアップを保存してください。</p>
     </div>
     <div class="editor-card basic-card"><h3>公開データの復元</h3>
-      <p>「Firestoreへ公開」する直前の公開状態を自動保存しています。誤って会場やプログラムを消した状態で公開した場合は、ここから<strong>直前の公開状態へ戻せます</strong>。</p>
+      <p>「Supabaseへ公開」する直前の公開状態を自動保存しています。誤って会場やプログラムを消した状態で公開した場合は、ここから<strong>直前の公開状態へ戻せます</strong>。</p>
       <p id="publicationBackupSummary" class="cloud-state" role="status">復元ポイントを確認中…</p>
       <div class="row-actions"><button type="button" id="firebaseRestorePrevious" class="btn light" disabled>直前の公開状態へ戻す</button></div>
-      <p id="publicationBackupMessage" class="caption" role="status">管理者Googleログイン後に復元ポイントを確認できます。</p>
+      <p id="publicationBackupMessage" class="caption" role="status">管理者ログイン後に復元ポイントを確認できます。</p>
       <p class="caption"><strong>二重保護：</strong>復元を実行する直前にも、現在の公開状態を新しい復元ポイントとして自動保存します。そのため、復元後にもう一度戻すこともできます。</p>
     </div>
     <div class="editor-card basic-card"><h3>JSONバックアップ（引き継ぎ用）</h3>
@@ -229,7 +234,7 @@
       <button id="exportJson" class="btn primary">下書きの設定JSONを書き出す</button>
       <label>設定JSONを読み込む<input type="file" id="importJson" accept=".json,application/json"></label>
       <button id="resetAll" class="btn danger">このブラウザの下書きを初期化</button>
-      <p class="caption">JSONの読み込みや下書きの初期化ではFirestoreの公開データは変更されません。公開する場合は明示的に「Firestoreへ公開」を押してください。</p>
+      <p class="caption">JSONの読み込みや下書きの初期化ではSupabaseの公開データは変更されません。公開する場合は明示的に「Supabaseへ公開」を押してください。</p>
     </div>
   </div>
 </section>

@@ -152,3 +152,4 @@
  .session-program-item{grid-template-columns:1fr}
  .session-program-item .minilink{justify-self:start}
 }
+.supabase-login-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:10px 0}.supabase-login-grid input{width:100%}@media(max-width:650px){.supabase-login-grid{grid-template-columns:1fr}}

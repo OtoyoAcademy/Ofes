@@ -11,7 +11,7 @@ const MAPS = [
 ];
 const STORAGE_KEY='ofes-prototype-v08'; // 旧版から維持
 const STAMP_KEY='ofes-stamp-v08';
-// 試作版の画面ロックのみ。Firebaseの安全な認証には使用しない。
+// 試作版の画面ロックのみ。Supabaseの安全な認証には使用しない。
 const DEMO_ADMIN_PASSWORD='ofes0034';
 const SESSION_IDS=['s1','s2','s3','s4'];
 const DEFAULT_SESSIONS={
@@ -88,7 +88,7 @@ function validData(v){
  return out;
 }
 function bound(v,a,b){const n=Number(v);return Number.isFinite(n)?Math.max(a,Math.min(b,n)):a}
-// ローカル編集用データと、Firestoreから取得した公開データは混ぜない。
+// ローカル編集用データと、Supabaseから取得した公開データは混ぜない。
 // バージョン更新時、従来のlocalStorageデータは編集用としてそのまま引き継ぐ。
 let hasLegacyDraft=false;
 try {hasLegacyDraft=!!localStorage.getItem(STORAGE_KEY);} catch(e) {console.warn('localStorage unavailable',e);}
@@ -112,7 +112,7 @@ function acceptPublished(doc){
   publishedState=doc?validData({...doc,test:{enabled:false,date:doc.eventDate||DEFAULT_DATA.eventDate,time:'09:25'}}):null;
   cloudAvailable=!!publishedState;
   if(!editorActive && !demoDraftPreview){state=publishedState||draftState;renderPublic();}
- }catch(e){console.error('公開データの形式が不正です',e);toast('Firestoreの公開データを読み込めませんでした。');}
+ }catch(e){console.error('公開データの形式が不正です',e);toast('Supabaseの公開データを読み込めませんでした。');}
 }
 function switchDraft(){
  editorActive=true;
@@ -128,9 +128,9 @@ window.OFESCloud={
   exportPublished:()=>projectPublished(draftState),
   publishedSummary:()=>({exists:cloudAvailable,year:publishedState?.year,zones:publishedState?.zones.length||0,programs:publishedState?.programs.length||0}),
   importPublishedAsDraft:()=>{
-   if(!publishedState)throw Error('Firestoreにはまだ公開データがありません。');
+   if(!publishedState)throw Error('Supabaseにはまだ公開データがありません。');
    draftState=clone(publishedState);state=draftState;persist();editId='';editDraft=null;drawMode='';adminMap='campus';
-   renderAdmin();renderPublic();toast('Firestoreの公開データを編集用に読み込みました');
+   renderAdmin();renderPublic();toast('Supabaseの公開データを編集用に読み込みました');
   }
 };
 window.addEventListener('ofes-cloud-published',e=>acceptPublished(e.detail?.data??null));
@@ -372,15 +372,15 @@ const reactionSelection={};
 let currentReactionUid='';
 function reactionEligibility(p){
  const reactionId=p.reactionId||p.id;
- if(reactionPreviewMode)return {active:true,preview:true,reason:'表示テスト中：アイコンを押すと選択・解除を試せます（Firestoreには保存しません）'};
+ if(reactionPreviewMode)return {active:true,preview:true,reason:'表示テスト中：アイコンを押すと選択・解除を試せます（Supabaseには保存しません）'};
  const pub=publishedState;
  const isPublished=!!pub?.programs?.some(x=>(x.reactionId||x.id)===reactionId);
- // Ver.1.13: デモデータは公開前でも操作感を確認できる。公開後は通常のFirestore保存へ自動的に切り替える。
+ // Ver.1.13: デモデータは公開前でも操作感を確認できる。公開後は通常のSupabase保存へ自動的に切り替える。
  if(demoDraftPreview && String(p.id||'').startsWith('demo-') && !isPublished){
-  return {active:true,preview:true,reason:'デモ操作：この端末だけで選択・解除を試せます。Firestoreへ公開すると、実際のリアクションとして保存・集計できます。'};
+  return {active:true,preview:true,reason:'デモ操作：この端末だけで選択・解除を試せます。Supabaseへ公開すると、実際のリアクションとして保存・集計できます。'};
  }
  if(!pub||!pub.reactionDeadlineAt)return {active:false,reason:'リアクション準備中（管理者の公開待ち）'};
- if(!isPublished)return {active:false,reason:'この発表をFirestoreへ公開すると受付できます'};
+ if(!isPublished)return {active:false,reason:'この発表をSupabaseへ公開すると受付できます'};
  const deadline=new Date(pub.reactionDeadline+':00+09:00');
  if(!Number.isFinite(deadline.getTime()))return {active:false,reason:'受付終了日時が未設定です'};
  return Date.now()<deadline.getTime()?{active:true,preview:false,reason:`受付終了：${esc(pub.reactionDeadline.replace('T',' '))}（日本時間）`}:{active:false,reason:'リアクションの受付は終了しました'};
@@ -688,7 +688,7 @@ function removeDemoPrograms(){
  state.programs=state.programs.filter(p=>!String(p.id).startsWith('demo-'));
  demoDraftPreview=true;state=draftState;
  persist();renderAdminPrograms();renderPublic();
- const msg=byId('demoDataMessage');if(msg)msg.textContent='デモ用プログラムを削除しました。この端末の会場案内にも即時反映しています。Firestoreへ公開済みの場合は、再度公開すると他端末からも消えます。';
+ const msg=byId('demoDataMessage');if(msg)msg.textContent='デモ用プログラムを削除しました。この端末の会場案内にも即時反映しています。Supabaseへ公開済みの場合は、再度公開すると他端末からも消えます。';
  toast('デモデータを削除しました');
 }
 function bindAdminProgramEvents(){
@@ -746,7 +746,7 @@ byId('printNotice').onclick=()=>{
  <h1>${esc(state.noticeTitle)}</h1><div class="message">${nl2brText(state.noticeMessage)}</div>
  <div class="main-grid"><div><h2>OFESアプリでできること</h2><ul class="features"><li><strong>プログラム：</strong>発表時間・発表内容・会場を確認できます。</li><li><strong>会場案内：</strong>学校全体図、前期棟、後期棟から会場を確認できます。</li><li><strong>スタンプラリー：</strong>校内5か所のQRコードを読み取って楽しめます。</li><li><strong>リアクション：</strong>発表への感想を5種類のボタンで届けられます。</li></ul><p><strong>今年度のスローガン：</strong>${esc(state.slogan)}</p></div><div class="qrbox"><strong>OFESはこちら</strong><br><img src="${qr}" alt="OFES QRコード"><div class="url">${esc(url)}</div><small>カメラでQRコードを読み取ってください。</small></div></div>
  <h2>スマートフォンのホーム画面に追加する方法</h2><div class="install"><div><strong>iPhone（Safari）</strong><ol><li>QRコードからOFESをSafariで開く</li><li>画面下の「共有」ボタン（□に↑）をタップ</li><li>「ホーム画面に追加」を選ぶ</li><li>「追加」をタップ</li></ol></div><div><strong>Android（Chrome）</strong><ol><li>QRコードからOFESをChromeで開く</li><li>右上の「︙」メニューをタップ</li><li>「ホーム画面に追加」または「アプリをインストール」を選ぶ</li><li>画面の案内に従って追加する</li></ol></div></div>
- <div class="note">※ OFESはWebアプリです。通常の閲覧にはGoogleログインは必要ありません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div><div class="issuer">${esc(state.noticeIssuer)}</div>
+ <div class="note">※ OFESはWebアプリです。通常の閲覧にはログインは必要ありません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div><div class="issuer">${esc(state.noticeIssuer)}</div>
  </body></html>`;
  w.document.open();w.document.write(html);w.document.close();
 };

@@ -1,45 +1,157 @@
-# OFES Ver.1.19
+# OFES Ver.1.20 — Supabase移行版
 
+Firebase / Firestore 依存を外し、学校用GitHub Pages + Supabase で動作するようにした移行版です。
 
-## Ver.1.18 追加機能：午前セッションを折りたたみ、プログラムからもリアクション
+公開URL（学校用）:
+https://otoyoacademy.github.io/Ofes/
 
-- 午前のセッション①〜④は、プログラム画面で折りたたみ／展開できるようにしました。
-- 初期状態では現在発表中のセッションだけを開き、それ以外は閉じて表示量を抑えます。
-- セッションを開くと、その時間帯の各発表について「会場を見る」と5種類のリアクションを操作できます。
-- 会場案内とプログラム画面は同じ `reactionId` を使うため、どちらからリアクションしても同じ発表の集計に反映されます。
-- 午後の体育館行事は従来どおりプログラム画面からリアクションできます。
-- Ver.1.17のFirestore公開前自動バックアップ、会場登録、既存リアクションデータはそのまま引き継ぎます。Firestore Security Rules の変更は不要です。
+## この版で置き換わるもの
 
-## Ver.1.17 追加機能：Firestore公開前の自動バックアップ
+- Firestore 公開データ → Supabase PostgreSQL `ofes_site_state`
+- Firebase Google管理者認証 → Supabase Auth メールアドレス＋パスワード
+- Firebase 匿名認証 → Supabase Anonymous Sign-In
+- Firestore Security Rules → PostgreSQL Row Level Security (RLS)
+- 公開前復元ポイント → `ofes_publication_backups`
+- リアクション → `ofes_reaction_votes`
+- リアクション全クリア前の復元ポイント → `ofes_reaction_backups`
 
-- 2回目以降に「Firestoreへ公開」を押すと、現在の `published/site` を `publicationBackups/site/points/...` に自動保存してから上書きします。
-- 復元ポイントの保存に失敗した場合、新しい公開処理は実行しません。
-- 管理画面「データ保存」に「直前の公開状態へ戻す」を追加しました。
-- 復元する直前にも現在の公開状態を自動保存するため、復元操作を取り消す（もう一度前の状態へ戻る）こともできます。
-- この機能を使うには、同梱の `firestore.rules` へ更新してください。
-- JSONバックアップは引き続き端末移行・長期保管用として併用してください。
+会場案内・プログラム・スタンプラリー・リアクションUI・集計PDF・保護者向けPDFなどの画面側はVer.1.19を引き継いでいます。
 
+## 重要：このZIPをすぐGitHubへ上書きしないでください
 
-## 2025年度プログラム参考デモ
+`supabase-config.js` はまだプレースホルダーです。
+先にSupabaseプロジェクトを作成し、SQL設定と管理者登録を終えてから、Project URL / Publishable key を入力してください。
 
-- 2025年度「おおとよ家フェスティバル」プログラムの時間構成を参考に、管理者画面の「デモデータを登録」を更新しました。
-- 午前はセッション①〜④、各セッション最大4会場、最大16発表です。
-- 1〜9年生、A班・B班、7・8年合同発表を含み、発表グループ別リアクション集計や学年別PDFを試せます。
-- 発表内容は試作用に再構成したダミー内容です。午前の実施会場は、管理画面ですでに登録されている会場へ自動的に割り当てます。
-- 午後は昨年度プログラムの流れを参考に、演舞、後期合唱、器楽合奏、英語発表、ダンス、歌、合同ステージ、PTAバンド、サックス、吹奏楽などを登録します。
-- 体育館・ホールとして登録された会場があれば午後の会場として優先使用します。該当会場がない場合は、登録済み会場からデモ用に1か所を割り当てます。
-- 「デモデータを削除」で `demo-` から始まる試作用プログラムだけを削除できます。既存の会場登録や本番プログラムは削除しません。
+## 移行手順
 
-## 引き継ぎ
+### 1. 現在のFirebase版を残す
 
-Ver.1.15までの会場・プログラム・Firestore公開データ・リアクションデータをそのまま引き継げます。Firestore Security Rules の変更はありません。
+- 個人Firebase `ofes-dev` は削除しない。
+- 現在GitHub Pagesで動いている版を、Supabase版の確認が終わるまで予備として残す。
+- OFES管理画面から最新の設定JSONを保存しておく。
 
-## 注意
+### 2. Supabaseプロジェクトを作成
 
-デモデータの発表内容・午前会場は2025年度資料そのものではなく、アプリの挙動確認用に作成したサンプルです。実際の本番プログラムに置き換えて使用してください。
+Supabase DashboardでFreeプロジェクトを1つ作成します。
+プロジェクト名の例: `ofes-school`
 
+データベースパスワードは安全な場所へ保管してください。
+地域を選択できる場合は、日本に近いリージョンを選びます。
 
-## Ver.1.19 追加機能
-- 午後の有志発表を1つの折りたたみグループにまとめました。
-- 午前セッションと同様に、現在進行中の午後グループだけ初期状態で展開します。
-- 展開すると各演目の時刻・学年・グループ・内容・会場・リアクション・会場を見るボタンを表示します。
+### 3. DB / RLSを一括設定
+
+Supabase Dashboard → SQL Editor で `supabase-setup.sql` の内容をすべて実行します。
+
+作成される主なテーブル:
+
+- `ofes_site_state`
+- `ofes_publication_backups`
+- `ofes_reaction_votes`
+- `ofes_reaction_backups`
+- `ofes_admins`
+
+### 4. Authenticationを設定
+
+Authentication の設定で次を確認します。
+
+- Email / Password: 使用
+- Anonymous Sign-In: 有効
+
+管理者の一般公開サインアップは不要です。
+管理者ユーザーはDashboardから1名作成し、学校用メールアドレスと強いパスワードを設定してください。
+
+作成した管理者ユーザーのUUIDをコピーします。
+
+`register-admin.sql.template` の
+`PASTE_ADMIN_USER_UUID_HERE`
+をUUIDへ置き換え、SQL Editorで実行します。
+
+### 5. Supabaseの接続情報を取得
+
+Project URL と Publishable key を取得します。
+
+`supabase-config.js` を開いて次を置き換えます。
+
+```js
+export const supabaseConfig = {
+  url: 'https://xxxxxxxx.supabase.co',
+  publishableKey: 'sb_publishable_xxxxxxxx'
+};
+```
+
+旧形式の `anon` public key しか表示されない場合は、それを `publishableKey` に設定しても構いません。
+
+**secret key / service_role key は絶対にGitHubへ置かないでください。**
+
+### 6. GitHub PagesへVer.1.20をアップロード
+
+`OFES_Ver1.20_Supabase` フォルダの「中身」を、学校GitHub `OtoyoAcademy / Ofes` のルートへ上書きします。
+
+Firebase用の以下のファイルはVer.1.20には不要です。
+
+- `firebase-config.js`
+- `firebase-bridge.js`
+- `firestore.rules`
+
+### 7. 管理者ログインを確認
+
+学校版URLを開きます。
+
+管理者 → Supabase接続 → 管理者メールアドレス＋パスワード
+
+次が確認できれば成功です。
+
+- SDK: 接続準備完了
+- 管理者認証: 管理者ログイン成功
+- Supabase公開: 未公開または公開データあり
+
+### 8. 既存JSONを読み込んでSupabaseへ公開
+
+管理者 → データ保存 → 設定JSONを読み込む
+
+会場・プログラムが戻ったことを確認してから、
+「Supabaseへ公開」
+を押します。
+
+これでFirebaseの公開データを直接コピーしなくても、設定JSONから学校用Supabaseへ移行できます。
+
+### 9. 本番前テスト
+
+最低限、次を確認してください。
+
+1. 通常ブラウザでプログラム・会場案内が表示される
+2. シークレットウィンドウでも同じデータが表示される
+3. 管理者で変更→Supabaseへ公開→別端末へ反映
+4. リアクションを押す／取り消す
+5. リアクション一括集計
+6. 全体PDF・学年別PDF
+7. リアクション全クリア→復元
+8. 公開データの自動バックアップ→直前状態へ復元
+9. スタンプラリー
+10. 保護者向けPDFのQRコードが学校URLを開く
+
+## Firebase側のデータについて
+
+Ver.1.20はFirebaseへアクセスしません。
+ただし、移行完了が確認できるまではFirebaseプロジェクトを削除しないでください。
+
+本番前のリアクションはテストデータのため、Ver.1.20ではFirebase上のリアクション履歴を自動移行しません。
+会場・プログラム・年度設定は設定JSONから移行します。
+
+## Supabase Free運用メモ
+
+OFESは年1回の利用なので、Freeプロジェクトが長期間低活動で一時停止される可能性があります。
+行事の1〜2週間前にSupabase Dashboardを開き、プロジェクトが稼働中か確認し、複数端末で本番テストしてください。
+
+## ファイル構成
+
+- `index.html` — アプリ本体
+- `app.js` — OFES画面・管理機能
+- `style.css` — デザイン
+- `supabase-bridge.js` — Supabaseとの通信・認証・リアクション・復元
+- `supabase-config.js` — Project URL / Publishable key
+- `supabase-setup.sql` — DB・RLS初期設定
+- `register-admin.sql.template` — 管理者UID登録テンプレート
+- `manifest.webmanifest` — ホーム画面アプリ設定
+- `assets/` — ロゴ、アイコン、学校用URLのQRコード
+

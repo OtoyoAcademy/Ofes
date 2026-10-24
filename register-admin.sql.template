@@ -1,0 +1,4 @@
+-- Authentication > Users で作成したOFES管理者のUIDを貼り付けて実行してください。
+insert into public.ofes_admins(user_id, note)
+values ('PASTE_ADMIN_USER_UUID_HERE', 'OFES管理者')
+on conflict (user_id) do nothing;

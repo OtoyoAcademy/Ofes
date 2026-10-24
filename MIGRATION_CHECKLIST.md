@@ -1,0 +1,25 @@
+# Firebase → Supabase 移行チェックリスト
+
+- [ ] 現行OFESの設定JSONを保存した
+- [ ] 個人Firebase `ofes-dev` はまだ削除していない
+- [ ] Supabase Freeプロジェクトを作成した
+- [ ] `supabase-setup.sql` をSQL Editorで実行した
+- [ ] Anonymous Sign-Inを有効にした
+- [ ] 管理者ユーザーを作成した
+- [ ] 管理者UUIDを `ofes_admins` に登録した
+- [ ] Project URLを取得した
+- [ ] Publishable keyを取得した
+- [ ] `supabase-config.js` を設定した
+- [ ] secret/service_role keyをGitHubへ入れていない
+- [ ] Ver.1.20を学校GitHubへアップロードした
+- [ ] 管理者ログイン成功
+- [ ] JSONを読み込んだ
+- [ ] Supabaseへ初回公開した
+- [ ] シークレットウィンドウで公開データを確認した
+- [ ] 匿名リアクション送信・取消を確認した
+- [ ] 管理者一括集計を確認した
+- [ ] 全体PDF・学年別PDFを確認した
+- [ ] リアクション全クリア→復元を確認した
+- [ ] 公開前バックアップ→公開データ復元を確認した
+- [ ] スマホ実機で確認した
+- [ ] Firebaseを停止・削除する判断は全テスト完了後に行う
