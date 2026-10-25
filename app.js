@@ -11,6 +11,7 @@ const MAPS = [
 ];
 const STORAGE_KEY='ofes-prototype-v08'; // 旧版から維持
 const STAMP_KEY='ofes-stamp-v08';
+const STAMP_BASE_URL='https://otoyoacademy.github.io/Ofes/';
 // 試作版の画面ロックのみ。Supabaseの安全な認証には使用しない。
 const DEMO_ADMIN_PASSWORD='ofes0034';
 const SESSION_IDS=['s1','s2','s3','s4'];
@@ -445,8 +446,8 @@ byId('cancelLogin').onclick=()=>byId('loginModal').hidden=true;
 byId('loginForm').onsubmit=e=>{e.preventDefault();if(byId('adminPassword').value!==DEMO_ADMIN_PASSWORD){byId('loginError').textContent='パスワードが違います。';return}
  byId('loginModal').hidden=true;switchDraft();byId('adminPanel').hidden=false;renderPublic();renderAdmin();};
 byId('closeAdmin').onclick=()=>{byId('adminPanel').hidden=true;drawMode='';closeDraft()};
-$$('#adminNav button').forEach(b=>b.onclick=()=>{const t=b.dataset.admin;$$('#adminNav button').forEach(x=>x.classList.toggle('active',x===b));$$('.admin-page').forEach(x=>x.classList.toggle('active',x.id===`admin-${t}`));if(t==='venues')renderEditor();if(t==='program')renderAdminPrograms();if(t==='basic')renderBasic();if(t==='notice')renderNotice();});
-function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');byId('adminMapSelect').value=adminMap;renderEditor();renderAdminPrograms();renderBasic();renderNotice();}
+$$('#adminNav button').forEach(b=>b.onclick=()=>{const t=b.dataset.admin;$$('#adminNav button').forEach(x=>x.classList.toggle('active',x===b));$$('.admin-page').forEach(x=>x.classList.toggle('active',x.id===`admin-${t}`));if(t==='venues')renderEditor();if(t==='program')renderAdminPrograms();if(t==='basic')renderBasic();if(t==='notice')renderNotice();if(t==='stampqr')renderStampQrAdmin();});
+function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');byId('adminMapSelect').value=adminMap;renderEditor();renderAdminPrograms();renderBasic();renderNotice();renderStampQrAdmin();}
 byId('adminMapSelect').onchange=e=>{adminMap=e.target.value;editId='';editDraft=null;drawMode='';renderEditor()};
 function renderEditor(){
  const m=getMap(adminMap);byId('adminMapSelect').value=adminMap;byId('adminMapImage').src=m.src;byId('adminMapImage').alt=m.name;
@@ -715,7 +716,7 @@ byId('testSlider').oninput=e=>{const n=Number(e.target.value);byId('testTime').v
 $$('[data-quick]').forEach(b=>b.onclick=()=>{byId('testTime').value=b.dataset.quick;byId('testDate').value=state.eventDate;byId('testEnabled').checked=true;updateTest();});
 
 function appPublicUrl(){
- const here=(location.protocol==='http:'||location.protocol==='https:')?location.origin+location.pathname:'https://2026sa.github.io/Ofes/';
+ const here=(location.protocol==='http:'||location.protocol==='https:')?location.origin+location.pathname:STAMP_BASE_URL;
  return here.endsWith('/')?here:here.replace(/\/[^/]*$/,'/');
 }
 function renderNotice(){
@@ -730,6 +731,27 @@ byId('saveNotice').onclick=()=>{
  state.noticeIssuer=byId('noticeIssuer').value.trim()||DEFAULT_DATA.noticeIssuer;
  persist();toast('保護者向け案内文を保存しました');
 };
+function stampFixedUrl(i){return `${STAMP_BASE_URL}?stamp=${i}`;}
+function stampQrAsset(i){return new URL(`assets/stamp-qr/stamp-${i}.svg`,location.href).href;}
+function renderStampQrAdmin(){
+ const grid=byId('stampQrAdminGrid');if(!grid)return;
+ grid.innerHTML=[1,2,3,4,5].map(i=>`<article class="stamp-qr-preview"><div class="stamp-qr-preview-head"><strong>スタンプ${'①②③④⑤'[i-1]}</strong><span>STAMP ${i}</span></div><img src="${stampQrAsset(i)}" alt="スタンプ${i} QRコード"><code>${esc(stampFixedUrl(i))}</code></article>`).join('');
+}
+function openStampQrPrint(mode){
+ const logo=new URL('assets/ofes-logo.png',location.href).href;
+ const cards=[1,2,3,4,5].map(i=>({i,url:stampFixedUrl(i),qr:stampQrAsset(i),circle:'①②③④⑤'[i-1]}));
+ const w=window.open('','OFES_STAMP_QR_PDF','width=1000,height=1000');
+ if(!w){alert('印刷画面を開けませんでした。ポップアップを許可してください。');return;}
+ const isPoster=mode==='poster';
+ const body=isPoster?cards.map(c=>`<section class="poster-page"><div class="brand"><img src="${logo}" alt="OFES"><div><b>OFES スタンプラリー</b><span>おおフェス</span></div></div><div class="stamp-no">スタンプ ${c.circle}</div><p class="lead">QRコードを読み取って<br><strong>スタンプGET！</strong></p><img class="qr poster-qr" src="${c.qr}" alt="スタンプ${c.i} QRコード"><div class="stamp-label">STAMP ${c.i}</div><div class="url">${esc(c.url)}</div><p class="foot">このQRコードは翌年度以降も同じものを使用できます。</p></section>`).join(''):
+ `<section class="sheet-page"><div class="sheet-title"><img src="${logo}" alt="OFES"><div><h1>OFES スタンプラリー QRコード一覧</h1><p>学校用・管理保管用 / 毎年同じQRコードを使用できます。</p></div></div><div class="sheet-grid">${cards.map(c=>`<article class="sheet-card"><div class="sheet-stamp">スタンプ ${c.circle}</div><img class="qr sheet-qr" src="${c.qr}" alt="スタンプ${c.i} QRコード"><b>STAMP ${c.i}</b><div class="url">${esc(c.url)}</div></article>`).join('')}</div><p class="sheet-note">印刷したQRコードを校内5か所に掲示してください。URLは https://otoyoacademy.github.io/Ofes/ に固定されています。</p></section>`;
+ const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>OFES スタンプラリーQRコード</title><style>
+ @page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP","Yu Gothic",Meiryo,sans-serif;color:#172019;background:#fff}.printbar{position:fixed;right:12px;top:12px;z-index:20}.printbar button{font-size:15px;padding:10px 16px;border:1px solid #bbb;border-radius:8px;background:#fff}.poster-page{height:273mm;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center;page-break-after:always;padding:6mm 8mm}.poster-page:last-child{page-break-after:auto}.brand{align-self:flex-start;display:flex;align-items:center;gap:8px;text-align:left}.brand img{width:22mm;height:22mm;object-fit:contain}.brand b{display:block;font-size:15pt}.brand span{font-size:10pt;color:#526058}.stamp-no{margin-top:12mm;font-size:30pt;font-weight:900;color:#197a4b}.lead{font-size:20pt;line-height:1.45;margin:7mm 0 5mm}.lead strong{font-size:28pt}.qr{object-fit:contain;background:#fff}.poster-qr{width:112mm;height:112mm}.stamp-label{font-size:20pt;font-weight:900;letter-spacing:.08em;margin-top:4mm}.url{font-size:8pt;word-break:break-all;color:#59675c;margin-top:3mm}.foot{margin-top:auto;font-size:9pt;color:#526058}.sheet-page{padding:2mm 1mm}.sheet-title{display:flex;align-items:center;gap:10px;border-bottom:2px solid #197a4b;padding-bottom:4mm;margin-bottom:5mm}.sheet-title img{width:20mm;height:20mm;object-fit:contain}.sheet-title h1{font-size:18pt;margin:0}.sheet-title p{margin:1mm 0 0;color:#526058;font-size:9.5pt}.sheet-grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm}.sheet-card{border:1px solid #cfd9d0;border-radius:10px;padding:4mm;text-align:center;min-height:76mm}.sheet-stamp{font-size:15pt;font-weight:850;color:#197a4b}.sheet-qr{width:45mm;height:45mm;display:block;margin:2mm auto}.sheet-card b{display:block;font-size:11pt}.sheet-card .url{font-size:6.5pt}.sheet-note{font-size:8.5pt;color:#526058;margin-top:4mm}@media print{.printbar{display:none}}
+ </style></head><body><div class="printbar"><button onclick="window.print()">印刷／PDFとして保存</button></div>${body}</body></html>`;
+ w.document.open();w.document.write(html);w.document.close();
+}
+byId('printStampPosters').onclick=()=>openStampQrPrint('poster');
+byId('printStampSheet').onclick=()=>openStampQrPrint('sheet');
 function jpEventDate(iso){try{const d=new Date(iso+'T00:00:00');return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${'日月火水木金土'[d.getDay()]}）`;}catch(e){return iso}}
 function nl2brText(v){return esc(v).replace(/\n/g,'<br>')}
 byId('printNotice').onclick=()=>{
