@@ -137,6 +137,7 @@ window.OFESCloud={
 window.addEventListener('ofes-cloud-published',e=>acceptPublished(e.detail?.data??null));
 
 let visitorBuilding='campus',session='current',visitorSelected='';
+let programGradeFilter='all';
 let programReturnScrollY=0;
 let reactionPreviewMode=false,reactionPreviewProgram=null;
 const visitorZoom=Object.fromEntries(MAPS.map(m=>[m.id,100]));
@@ -167,6 +168,37 @@ function viewTime(){if(state.test.enabled){return {date:state.test.date,time:sta
 function activePrograms(){const t=viewTime();return state.programs.filter(p=>{const pt=programTimes(p);return t.date===state.eventDate && timeNum(pt.start)<=t.minute && t.minute<timeNum(pt.end)})}
 function scheduledPrograms(){if(session==='current')return activePrograms();return state.programs.filter(p=>p.session===session)}
 function orderedPrograms(){return [...state.programs].sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||String(a.zoneId).localeCompare(String(b.zoneId))||String(a.id).localeCompare(String(b.id)))}
+function normalizeGradeText(v){
+ return String(v||'').replace(/[０-９]/g,ch=>String('０１２３４５６７８９'.indexOf(ch))).replace(/[～~]/g,'〜').replace(/[－—–]/g,'-');
+}
+function programGradeNumbers(p){
+ const raw=normalizeGradeText(p?.grade).trim();
+ if(!raw)return [];
+ if(/全学年|全校|全体/.test(raw))return [1,2,3,4,5,6,7,8,9];
+ const set=new Set();
+ for(const m of raw.matchAll(/([1-9])\s*[〜-]\s*([1-9])/g)){
+  const a=Number(m[1]),b=Number(m[2]),lo=Math.min(a,b),hi=Math.max(a,b);
+  for(let n=lo;n<=hi;n++)set.add(n);
+ }
+ for(const m of raw.matchAll(/[1-9]/g))set.add(Number(m[0]));
+ return [...set].sort((a,b)=>a-b);
+}
+function programMatchesGrade(p,filter=programGradeFilter){
+ if(filter==='all')return true;
+ const raw=String(p?.grade||'').trim();
+ if(!raw)return true; // 学年未指定は全体行事として各学年に表示
+ return programGradeNumbers(p).includes(Number(filter));
+}
+function renderGradeFilter(){
+ const root=byId('gradeFilter');if(!root)return;
+ root.querySelectorAll('[data-grade-filter]').forEach(b=>{
+  const active=b.dataset.gradeFilter===programGradeFilter;
+  b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));
+ });
+ const label=programGradeFilter==='all'?'全プログラム':`${programGradeFilter}年生のプログラム`;
+ if(byId('programHeading'))byId('programHeading').textContent=label;
+ if(byId('gradeFilterNote'))byId('gradeFilterNote').textContent=programGradeFilter==='all'?'すべてのプログラムを表示しています。':`${programGradeFilter}年生に関係する発表と全体行事を表示しています。`;
+}
 function roomLabel(p){return getZone(p.zoneId)?.name||'会場未登録'}
 function renderHeader(){
  byId('heroYear').textContent=state.year;
@@ -178,24 +210,39 @@ function renderHeader(){
 }
 function setTab(tab,opts={}){$$('.nav').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$$('.tab-view').forEach(v=>v.classList.toggle('active',v.id===`tab-${tab}`));if(tab==='venues')renderVisitorMap();if(opts.scrollTop!==false)window.scrollTo({top:0,behavior:'smooth'});}
 $$('.nav').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+byId('gradeFilter')?.addEventListener('click',e=>{const b=e.target.closest('[data-grade-filter]');if(!b)return;programGradeFilter=b.dataset.gradeFilter||'all';renderProgram();});
 function renderProgram(){
- const v=viewTime(),active=activePrograms();let text=`現在の判定時刻：<strong>${esc(v.date)} ${esc(v.time)}</strong>`;
- if(v.date!==state.eventDate)text+='　<span class="muted">開催日以外のため、開催中のプログラムはありません。</span>';
- else text+=active.length?`<br>ただいま開催中：${active.map(p=>esc(`${p.grade?`${p.grade} `:''}${p.group?`${p.group} `:''}${p.title}`)).join('・')}`:'<br>現在開催中のプログラムはありません。';
+ renderGradeFilter();
+ const filteredOrdered=orderedPrograms().filter(p=>programMatchesGrade(p));
+ const v=viewTime(),active=activePrograms().filter(p=>programMatchesGrade(p));
+ let text='';
+ if(v.date!==state.eventDate){
+  text=`開催日：<strong>${esc(state.eventDate.replaceAll('-','/'))}</strong>`;
+ }else if(active.length){
+  text=`<strong>ただいま開催中</strong><br>${active.map(p=>esc(`${p.grade?`${p.grade} `:''}${p.group?`${p.group} `:''}${p.title}`)).join('・')}`;
+ }else{
+  text='現在開催中のプログラムはありません。';
+ }
  byId('timeStatus').innerHTML=text;
  const units=[];
- // 午前セッションは時間帯ごとにまとめる。午後の有志発表も1つの折りたたみグループにまとめる。
- for(const p of orderedPrograms().filter(p=>!SESSION_IDS.includes(p.session) && p.session!=='afternoon')){const pt=programTimes(p);units.push({type:'single',start:pt.start,p});}
- for(const sid of SESSION_IDS){const ps=orderedPrograms().filter(p=>p.session===sid);if(ps.length){const d=sessionDef(sid);units.push({type:'session',start:d.start,sid,programs:ps});}}
- const afternoonPrograms=orderedPrograms().filter(p=>p.session==='afternoon');
+ // 午前セッションは時間帯ごと、午後の有志発表も1つの折りたたみグループにまとめる。
+ for(const p of filteredOrdered.filter(p=>!SESSION_IDS.includes(p.session) && p.session!=='afternoon')){const pt=programTimes(p);units.push({type:'single',start:pt.start,p});}
+ for(const sid of SESSION_IDS){const ps=filteredOrdered.filter(p=>p.session===sid);if(ps.length){const d=sessionDef(sid);units.push({type:'session',start:d.start,sid,programs:ps});}}
+ const afternoonPrograms=filteredOrdered.filter(p=>p.session==='afternoon');
  if(afternoonPrograms.length){
   const starts=afternoonPrograms.map(p=>timeNum(programTimes(p).start));
   units.push({type:'afternoon-group',start:programTimes(afternoonPrograms[0]).start,programs:afternoonPrograms,groupStart:Math.min(...starts)});
  }
  units.sort((a,b)=>timeNum(a.start)-timeNum(b.start)||String(a.sid||a.p?.id||a.type||'').localeCompare(String(b.sid||b.p?.id||b.type||'')));
+ if(!units.length){
+  byId('programList').innerHTML='<div class="notice-card">この学年に該当するプログラムは登録されていません。</div>';
+  return;
+ }
  byId('programList').innerHTML=units.map(unit=>{
   if(unit.type==='session'){
-   const d=sessionDef(unit.sid),st=programStatus(unit.programs[0]);
+   const d=sessionDef(unit.sid);
+   const statuses=unit.programs.map(programStatus);
+   const st=statuses.some(x=>x.key==='live')?{key:'live',label:'発表中'}:(statuses.every(x=>x.key==='ended')?{key:'ended',label:'終了しました'}:{key:'upcoming',label:'発表予定'});
    const items=unit.programs.slice().sort((a,b)=>String(roomLabel(a)).localeCompare(String(roomLabel(b)))).map(p=>`<div class="session-program-item"><div class="session-program-main"><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong><div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`).join('');
    return `<details class="program-session-group ${st.key==='live'?'on':''}" ${st.key==='live'?'open':''}><summary class="program-session-summary"><span class="time">${esc(d.start)}</span><span class="session-summary-main"><strong>${esc(d.label)}</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(d.start)}〜${esc(d.end)}　${unit.programs.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
   }
@@ -384,7 +431,7 @@ function reactionEligibility(p){
  if(!isPublished)return {active:false,reason:'この発表をSupabaseへ公開すると受付できます'};
  const deadline=new Date(pub.reactionDeadline+':00+09:00');
  if(!Number.isFinite(deadline.getTime()))return {active:false,reason:'受付終了日時が未設定です'};
- return Date.now()<deadline.getTime()?{active:true,preview:false,reason:`受付終了：${esc(pub.reactionDeadline.replace('T',' '))}（日本時間）`}:{active:false,reason:'リアクションの受付は終了しました'};
+ return Date.now()<deadline.getTime()?{active:true,preview:false,reason:''}:{active:false,reason:'リアクションの受付は終了しました'};
 }
 function reactionsHtml(p){
  const info=reactionEligibility(p);
@@ -392,7 +439,7 @@ function reactionsHtml(p){
  const selected=reactionSelection[reactionId]||[];
  return `<div class="reactions-box ${info.preview?'reaction-preview':''}" data-reaction-box="${esc(reactionId)}"><div class="reactions-title">この発表にリアクション</div>
   <div class="reaction-choices">${REACTION_KINDS.map(([key,emoji,name])=>`<button type="button" title="${esc(name)}" aria-label="${esc(name)}" data-reaction-program="${esc(reactionId)}" data-reaction-kind="${key}" data-reaction-preview="${info.preview?'1':'0'}" class="reaction-choice ${selected.includes(key)?'is-selected':''}" aria-pressed="${selected.includes(key)}" ${info.active?'':'disabled'}><span aria-hidden="true">${emoji}</span></button>`).join('')}</div>
-  <p class="reaction-hint" data-reaction-message="${esc(reactionId)}" role="status">${info.reason}</p></div>`;
+  <p class="reaction-hint" data-reaction-message="${esc(reactionId)}" role="status" ${info.reason?'':'hidden'}>${info.reason}</p></div>`;
 }
 function refreshReactionButtons(programId){
  const selected=reactionSelection[programId]||[];
@@ -403,7 +450,7 @@ function refreshReactionButtons(programId){
  });
 }
 function reactionMessage(programId,text){
- document.querySelectorAll('[data-reaction-message]').forEach(el=>{if(el.dataset.reactionMessage===programId)el.textContent=text});
+ document.querySelectorAll('[data-reaction-message]').forEach(el=>{if(el.dataset.reactionMessage!==programId)return;el.textContent=text;el.hidden=!text;});
 }
 window.addEventListener('ofes-reaction-selection',e=>{
  const {programId,selected,uid}=e.detail||{};
@@ -542,7 +589,7 @@ function renderAdminPrograms(){
  byId('adminPrograms').innerHTML=`
  <div class="editor-card program-step-card"><div class="step-title"><span>1</span><div><h3>セッション①〜④の時間帯</h3><p class="muted">ここで設定した時間が、同じセッションを選んだすべての会場に共通で適用されます。</p></div></div>
  <div class="session-time-grid">${SESSION_IDS.map(id=>{const d=sessionDef(id);return `<div class="session-time-row" data-session-setting="${id}"><strong>${esc(d.label)}</strong><label>開始<input type="time" data-session-time="start" value="${esc(d.start)}"></label><label>終了<input type="time" data-session-time="end" value="${esc(d.end)}"></label></div>`}).join('')}</div></div>
- <div class="editor-card program-step-card"><div class="step-title"><span>2</span><div><h3>会場ごとの発表登録</h3><p class="muted">会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。開始・終了時刻は上の設定から自動で入ります。</p></div></div>
+ <div class="editor-card program-step-card"><div class="step-title"><span>2</span><div><h3>会場ごとの発表登録</h3><p class="muted">会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。開始・終了時刻は上の設定から自動で入ります。</p><p class="caption">発表学年は「7年生・8年生」「7・8年生」「6〜9年生」のように入力できます。学年欄を空欄にしたプログラムは全体行事として扱い、来場者がどの学年を選んでも表示します。</p></div></div>
  <label class="venue-program-selector">会場<select id="programVenueSelect">${state.zones.length?state.zones.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(z=>`<option value="${esc(z.id)}" ${z.id===adminProgramVenue?'selected':''}>${esc(z.id)}｜${esc(z.name)}</option>`).join(''):'<option value="">先に会場を登録してください</option>'}</select></label>
  <div class="venue-program-editor">${selectedZone?`<div class="venue-program-admin-heading"><strong>${esc(selectedZone.name)}</strong><span>${esc(selectedZone.id)}</span></div>${venuePrograms.length?venuePrograms.map(p=>adminVenueProgramRow(p)).join(''):'<p class="muted">この会場には、まだ発表が登録されていません。</p>'}<button type="button" id="addVenueProgram" class="btn light">＋ この会場に発表を登録</button>`:'<p class="muted">「会場・配置図」で会場を登録すると、ここから発表を追加できます。</p>'}</div></div>
  ${unassigned.length?`<div class="editor-card"><h3>会場未設定の発表</h3><p class="muted">旧バージョンから引き継いだ発表などです。会場を選択すると上の会場別登録へ移ります。</p><div class="legacy-program-list">${unassigned.map(p=>adminUnassignedRow(p)).join('')}</div></div>`:''}
@@ -806,7 +853,7 @@ byId('importJson').onchange=async e=>{
   e.target.value='';
  }
 };
-byId('resetAll').onclick=()=>{if(!confirm('登録した会場・プログラムなどの試作データをすべて初期化しますか？'))return;state=clone(DEFAULT_DATA);draftState=state;persist();adminMap='campus';editId='';editDraft=null;adminProgramVenue='';renderAdmin();renderPublic();toast('初期化しました')};
+byId('resetAll').onclick=()=>{if(!confirm('このブラウザに保存した会場・プログラムなどの下書きデータをすべて初期化しますか？'))return;state=clone(DEFAULT_DATA);draftState=state;persist();adminMap='campus';editId='';editDraft=null;adminProgramVenue='';renderAdmin();renderPublic();toast('初期化しました')};
 renderPublic();readStampFromUrl();
 // 外部SDKが読み込めない場合も、接続タブで理由が分かるようにする。
 setTimeout(()=>{
