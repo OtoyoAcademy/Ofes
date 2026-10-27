@@ -150,7 +150,6 @@ window.OFESCloud={
 window.addEventListener('ofes-cloud-published',e=>acceptPublished(e.detail?.data??null));
 
 let visitorBuilding='campus',session='current',visitorSelected='';
-let programGradeFilter='all';
 let programReturnScrollY=0;
 let reactionPreviewMode=false,reactionPreviewProgram=null;
 const visitorZoom=Object.fromEntries(MAPS.map(m=>[m.id,100]));
@@ -183,37 +182,6 @@ function viewTime(){if(state.test.enabled){return {date:state.test.date,time:sta
 function activePrograms(){const t=viewTime();return state.programs.filter(p=>{const pt=programTimes(p);return t.date===state.eventDate && timeNum(pt.start)<=t.minute && t.minute<timeNum(pt.end)})}
 function scheduledPrograms(){if(session==='current')return activePrograms();return state.programs.filter(p=>p.session===session)}
 function orderedPrograms(){return [...state.programs].sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||String(a.zoneId).localeCompare(String(b.zoneId))||String(a.id).localeCompare(String(b.id)))}
-function normalizeGradeText(v){
- return String(v||'').replace(/[０-９]/g,ch=>String('０１２３４５６７８９'.indexOf(ch))).replace(/[～~]/g,'〜').replace(/[－—–]/g,'-');
-}
-function programGradeNumbers(p){
- const raw=normalizeGradeText(p?.grade).trim();
- if(!raw)return [];
- if(/全学年|全校|全体/.test(raw))return [1,2,3,4,5,6,7,8,9];
- const set=new Set();
- for(const m of raw.matchAll(/([1-9])\s*[〜-]\s*([1-9])/g)){
-  const a=Number(m[1]),b=Number(m[2]),lo=Math.min(a,b),hi=Math.max(a,b);
-  for(let n=lo;n<=hi;n++)set.add(n);
- }
- for(const m of raw.matchAll(/[1-9]/g))set.add(Number(m[0]));
- return [...set].sort((a,b)=>a-b);
-}
-function programMatchesGrade(p,filter=programGradeFilter){
- if(filter==='all')return true;
- const raw=String(p?.grade||'').trim();
- if(!raw)return true; // 学年未指定は全体行事として各学年に表示
- return programGradeNumbers(p).includes(Number(filter));
-}
-function renderGradeFilter(){
- const root=byId('gradeFilter');if(!root)return;
- root.querySelectorAll('[data-grade-filter]').forEach(b=>{
-  const active=b.dataset.gradeFilter===programGradeFilter;
-  b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));
- });
- const label=programGradeFilter==='all'?'全プログラム':`${programGradeFilter}年生のプログラム`;
- if(byId('programHeading'))byId('programHeading').textContent=label;
- if(byId('gradeFilterNote'))byId('gradeFilterNote').textContent=programGradeFilter==='all'?'すべてのプログラムを表示しています。':`${programGradeFilter}年生に関係する発表と全体行事を表示しています。`;
-}
 function roomLabel(p){return getZone(p.zoneId)?.name||'会場未登録'}
 function renderHeader(){
  byId('heroYear').textContent=state.year;
@@ -223,13 +191,11 @@ function renderHeader(){
  byId('countdown').textContent=dif>0?`開催まであと ${dif} 日`:dif===0?'いよいよ本日！':'今年のおおフェスは終了しました';
  const v=viewTime();byId('previewTag').hidden=!v.demo;byId('previewTag').textContent=`TEST ${v.date} ${v.time}`;
 }
-function setTab(tab,opts={}){$$('.nav').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$$('.tab-view').forEach(v=>v.classList.toggle('active',v.id===`tab-${tab}`));if(tab==='venues')renderVisitorMap();if(opts.scrollTop!==false)window.scrollTo({top:0,behavior:'smooth'});}
+function setTab(tab,opts={}){if(tab!=='stamp'&&stampScannerActive)closeStampScanner();$$('.nav').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$$('.tab-view').forEach(v=>v.classList.toggle('active',v.id===`tab-${tab}`));if(tab==='venues')renderVisitorMap();if(opts.scrollTop!==false)window.scrollTo({top:0,behavior:'smooth'});}
 $$('.nav').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
-byId('gradeFilter')?.addEventListener('click',e=>{const b=e.target.closest('[data-grade-filter]');if(!b)return;programGradeFilter=b.dataset.gradeFilter||'all';renderProgram();});
 function renderProgram(){
- renderGradeFilter();
- const filteredOrdered=orderedPrograms().filter(p=>programMatchesGrade(p));
- const v=viewTime(),active=activePrograms().filter(p=>programMatchesGrade(p));
+ const filteredOrdered=orderedPrograms();
+ const v=viewTime(),active=activePrograms();
  let text='';
  if(v.date!==state.eventDate){
   text=`開催日：<strong>${esc(state.eventDate.replaceAll('-','/'))}</strong>`;
@@ -250,7 +216,7 @@ function renderProgram(){
  }
  units.sort((a,b)=>timeNum(a.start)-timeNum(b.start)||String(a.sid||a.p?.id||a.type||'').localeCompare(String(b.sid||b.p?.id||b.type||'')));
  if(!units.length){
-  byId('programList').innerHTML='<div class="notice-card">この学年に該当するプログラムは登録されていません。</div>';
+  byId('programList').innerHTML='<div class="notice-card">プログラムはまだ登録されていません。</div>';
   return;
  }
  byId('programList').innerHTML=units.map(unit=>{
@@ -449,12 +415,124 @@ function renderVisitorMap(){
  }));
  enableMapPinch();sizeVisibleFloorMaps();updateSelectedFloorDetails();
 }
-function stampList(){try{return JSON.parse(localStorage.getItem(STAMP_KEY)||'[]')}catch{return[]}}
-function renderStamps(){const a=stampList();byId('stampProgress').textContent=`獲得スタンプ：${a.length} / 5`;
- byId('stampCards').innerHTML=[1,2,3,4,5].map(i=>`<div class="stamp-item ${a.includes(i)?'got':''}"><div class="star">⭐</div><b>STAMP ${i}</b><small>${a.includes(i)?'取得済み':'未取得'}</small></div>`).join('');}
-function readStampFromUrl(){const v=new URLSearchParams(location.search).get('stamp'), n=Number(v);if(!Number.isInteger(n)||n<1||n>5)return;
- const current=stampList();if(!current.includes(n)){current.push(n);localStorage.setItem(STAMP_KEY,JSON.stringify(current));}
- renderStamps();setTab('stamp');}
+function stampList(){
+ try{
+  const raw=JSON.parse(localStorage.getItem(STAMP_KEY)||'[]');
+  if(!Array.isArray(raw))return [];
+  return [...new Set(raw.map(Number).filter(n=>Number.isInteger(n)&&n>=1&&n<=5))].sort((a,b)=>a-b);
+ }catch{return []}
+}
+function saveStamp(n){
+ if(!Number.isInteger(n)||n<1||n>5)return {ok:false,added:false,list:stampList()};
+ const current=stampList(),added=!current.includes(n);
+ if(added)current.push(n);
+ const clean=[...new Set(current)].sort((a,b)=>a-b);
+ try{localStorage.setItem(STAMP_KEY,JSON.stringify(clean));}
+ catch(e){console.error('stamp save failed',e);return {ok:false,added:false,list:stampList()};}
+ return {ok:true,added,list:clean};
+}
+function renderStamps(){
+ const a=stampList(),progress=byId('stampProgress');
+ if(progress){
+  progress.innerHTML=a.length===5
+   ? `<strong>🎉 5 / 5　コンプリート！</strong><span>5つのスタンプがそろいました。</span>`
+   : `<strong>獲得スタンプ：${a.length} / 5</strong><span>あと ${5-a.length} 個です。</span>`;
+ }
+ byId('stampCards').innerHTML=[1,2,3,4,5].map(i=>`<div class="stamp-item ${a.includes(i)?'got':''}"><div class="star">⭐</div><b>STAMP ${i}</b><small>${a.includes(i)?'取得済み':'未取得'}</small></div>`).join('');
+}
+function parseStampQrValue(value){
+ try{
+  const base=new URL(STAMP_BASE_URL),u=new URL(String(value||'').trim(),STAMP_BASE_URL);
+  const norm=p=>{const t=String(p||'').replace(/\/+$/,'');return (t||'')+'/';};
+  if(u.origin!==base.origin||norm(u.pathname)!==norm(base.pathname))return null;
+  const n=Number(u.searchParams.get('stamp'));
+  return Number.isInteger(n)&&n>=1&&n<=5?n:null;
+ }catch{return null}
+}
+function showStampMessage(text,type='success'){
+ const el=byId('stampScanMessage');if(!el)return;el.textContent=text;el.className=`stamp-scan-message ${type}`;
+}
+function acceptStampNumber(n,source='camera'){
+ const result=saveStamp(n);
+ if(!result.ok){showStampMessage('スタンプを端末に保存できませんでした。ブラウザの保存設定をご確認ください。','error');return false;}
+ renderStamps();
+ if(result.added){
+  const left=5-result.list.length;
+  showStampMessage(left===0?`🎉 STAMP ${n} をGET！ 5つそろいました！`:`⭐ STAMP ${n} をGET！ あと ${left} 個です。`,'success');
+ }else{showStampMessage(`STAMP ${n} はすでに取得済みです。`,'info');}
+ return true;
+}
+function readStampFromUrl(){
+ const n=parseStampQrValue(location.href);if(!n)return;
+ acceptStampNumber(n,'url');renderStamps();setTab('stamp');
+ try{history.replaceState(null,'',location.pathname+location.hash);}catch{}
+}
+
+// Ver.1.26: OFES内でカメラを起動してQRを読み取り、同じアプリのlocalStorageに保存する。
+let stampScanner=null,stampScannerActive=false,stampScanLocked=false;
+async function closeStampScanner(){
+ const modal=byId('stampScannerModal');
+ stampScanLocked=false;
+ try{
+  if(stampScanner&&stampScannerActive){await stampScanner.stop();}
+ }catch(e){console.warn('stamp scanner stop',e)}
+ try{if(stampScanner)stampScanner.clear();}catch(e){console.warn('stamp scanner clear',e)}
+ stampScanner=null;stampScannerActive=false;
+ if(modal)modal.hidden=true;
+ const reader=byId('stampQrReader');if(reader)reader.innerHTML='';
+}
+async function handleStampDecoded(decodedText){
+ if(stampScanLocked)return;
+ const n=parseStampQrValue(decodedText);
+ if(!n){
+  const status=byId('stampScannerStatus');if(status)status.textContent='OFESスタンプラリーのQRコードではありません。別のQRコードを読み取ってください。';
+  return;
+ }
+ stampScanLocked=true;
+ const result=saveStamp(n);
+ renderStamps();
+ const status=byId('stampScannerStatus');
+ if(!result.ok){
+  if(status)status.textContent='端末への保存に失敗しました。';
+  showStampMessage('スタンプを端末に保存できませんでした。','error');
+  stampScanLocked=false;return;
+ }
+ const left=5-result.list.length;
+ const msg=result.added?(left===0?`🎉 STAMP ${n} をGET！ 5つそろいました！`:`⭐ STAMP ${n} をGET！ あと ${left} 個です。`):`STAMP ${n} はすでに取得済みです。`;
+ if(status)status.textContent=msg;showStampMessage(msg,result.added?'success':'info');
+ if(navigator.vibrate)try{navigator.vibrate(80)}catch{}
+ setTimeout(()=>closeStampScanner(),900);
+}
+async function openStampScanner(){
+ setTab('stamp',{scrollTop:false});
+ const modal=byId('stampScannerModal'),status=byId('stampScannerStatus');
+ if(!modal)return;modal.hidden=false;
+ if(status)status.textContent='カメラを準備しています…';
+ stampScanLocked=false;
+ if(!window.isSecureContext){if(status)status.textContent='カメラはHTTPS接続でのみ利用できます。学校用GitHub Pagesから開いてください。';return;}
+ if(typeof Html5Qrcode==='undefined'){if(status)status.textContent='QR読み取り機能を読み込めませんでした。通信環境を確認して再読み込みしてください。';return;}
+ try{
+  stampScanner=new Html5Qrcode('stampQrReader',{formatsToSupport:[Html5QrcodeSupportedFormats.QR_CODE],verbose:false});
+  const minBox=Math.max(190,Math.min(280,Math.floor(Math.min(window.innerWidth,window.innerHeight)*0.58)));
+  await stampScanner.start(
+   {facingMode:'environment'},
+   {fps:10,qrbox:{width:minBox,height:minBox},aspectRatio:1.0,disableFlip:false},
+   handleStampDecoded,
+   ()=>{}
+  );
+  stampScannerActive=true;if(status)status.textContent='QRコードを枠の中に入れてください。';
+ }catch(error){
+  console.error('stamp scanner start',error);
+  stampScannerActive=false;
+  const name=String(error?.name||'');
+  if(status)status.textContent=name.includes('NotAllowed')?'カメラの使用が許可されていません。ブラウザのカメラ権限を許可してください。':'カメラを起動できませんでした。カメラ権限と通信環境をご確認ください。';
+ }
+}
+byId('openStampScanner')?.addEventListener('click',openStampScanner);
+byId('closeStampScanner')?.addEventListener('click',closeStampScanner);
+byId('stopStampScanner')?.addEventListener('click',closeStampScanner);
+byId('stampScannerModal')?.addEventListener('click',e=>{if(e.target===byId('stampScannerModal'))closeStampScanner();});
+window.addEventListener('pagehide',()=>{if(stampScannerActive)closeStampScanner();});
 
 // Ver.1.18: 午前は会場詳細と折りたたみ式プログラムの両方、午後はプログラム画面でリアクション。デモは公開前でもローカル操作確認可能。
 const REACTION_KINDS=[['good','👍','よかった'],['aha','💡','なるほど'],['amazing','✨','すごい'],['fun','😊','楽しかった'],['cheer','🙌','応援したい']];
@@ -895,7 +973,7 @@ byId('printNotice').onclick=()=>{
  w.document.open();w.document.write(html);w.document.close();
 };
 
-byId('exportJson').onclick=()=>{const blob=new Blob([JSON.stringify({version:14,data:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`OFES_${state.year}_backup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);};
+byId('exportJson').onclick=()=>{const blob=new Blob([JSON.stringify({version:15,data:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`OFES_${state.year}_backup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);};
 byId('importJson').onchange=async e=>{
  const f=e.target.files?.[0];if(!f)return;
  const status=byId('importJsonStatus');
