@@ -1,5 +1,5 @@
 /**
- * OFES Ver.1.20: Supabase Auth + Postgres/RLS + Realtime.
+ * OFES Ver.1.27: Supabase Auth + public/private data + annual archives + Realtime.
  * Firebase依存を外し、Supabaseの公開データ・匿名リアクション・管理者認証・復元ポイントへ移行。
  */
 import { supabaseConfig } from './supabase-config.js';
@@ -129,6 +129,7 @@ async function refreshSessionUi(userOverride=undefined){
   status(readResult,currentIsAdmin?'Supabaseの管理者権限を確認できます。':'管理者ログイン後に確認できます。');
   await refreshRestorePointInfo();
   await refreshPublicationBackupInfo();
+  if(currentIsAdmin && publishedData?.year){try{await fetchAdminInternal(publishedData.year);}catch(error){console.warn('internal admin load',error);}}
 }
 async function fetchPublished(){
   const { data, error } = await supabase.from('ofes_site_state')
@@ -268,20 +269,47 @@ function overallStatsSorted(){return latestAllStats.slice().sort((a,b)=>{const g
 pdfOverallButton?.addEventListener('click',()=>{if(!latestAllStats.length)return;const rows=overallStatsSorted().map(item=>`<tr><td>${htmlEsc(item.grade)}</td><td>${htmlEsc(item.groupName)}</td><td>${htmlEsc(item.title)}</td><td>${item.schedules.map(htmlEsc).join('<br>')}</td><td>${htmlEsc(item.zoneName)}</td><td class="num">${item.respondents}</td>${REACTION_KEYS.map(k=>`<td class="num react">${item.counts[k]}</td>`).join('')}</tr>`).join('');const body=`<h1>OFES リアクション全体集計</h1><p class="meta">${htmlEsc(publishedData.year||'')}年度　開催日：${htmlEsc(publishedData.eventDate||'')}　全発表グループを重複なく一覧表示しています。</p><table><colgroup><col class="c-grade"><col class="c-group"><col class="c-title"><col class="c-time"><col class="c-place"><col class="c-respond"><col class="c-react"><col class="c-react"><col class="c-react"><col class="c-react"><col class="c-react"></colgroup><thead><tr><th>学年</th><th>グループ</th><th>発表内容</th><th>実施時間</th><th>会場</th><th>回答</th><th class="react">👍</th><th class="react">💡</th><th class="react">✨</th><th class="react">😊</th><th class="react">🙌</th></tr></thead><tbody>${rows}</tbody></table><p class="note">※ 合同発表も全体版では1つの発表グループとして1行だけ掲載します。個人を特定する情報は掲載していません。</p>`;openReactionPrintWindow('OFES_REACTION_ALL','OFES リアクション全体集計',body,'col.c-grade{width:8%}col.c-group{width:8%}col.c-title{width:27%}col.c-time{width:19%}col.c-place{width:10%}col.c-respond{width:4%}col.c-react{width:4.8%}');});
 pdfGradeButton?.addEventListener('click',()=>{if(!latestAllStats.length)return;const sections=statsByGrade().map(([grade,items])=>`<section class="grade-page"><h1>OFES リアクションフィードバック</h1><h2>${htmlEsc(grade)}のみなさんへ</h2><div class="message"><strong>発表、おつかれさまでした！</strong><br>この表は、みなさんの発表を見た人から届いたリアクションをまとめたものです。数字の大小は順位ではありません。どんなところが伝わったのか、どんなよさや工夫があったのかを振り返り、次の学びや発表につなげていきましょう。</div><p class="meta">${htmlEsc(publishedData.year||'')}年度　開催日：${htmlEsc(publishedData.eventDate||'')}</p><table><colgroup><col class="c-group"><col class="c-title"><col class="c-time"><col class="c-place"><col class="c-respond"><col class="c-react"><col class="c-react"><col class="c-react"><col class="c-react"><col class="c-react"></colgroup><thead><tr><th>グループ</th><th>発表内容</th><th>実施時間</th><th>会場</th><th>回答</th><th class="react">👍</th><th class="react">💡</th><th class="react">✨</th><th class="react">😊</th><th class="react">🙌</th></tr></thead><tbody>${items.map(item=>`<tr><td>${htmlEsc(item.groupName)}${item.gradeLabels?.length>1?`<small class="joint">${htmlEsc(item.grade)}合同</small>`:''}</td><td>${htmlEsc(item.title)}</td><td>${item.schedules.map(htmlEsc).join('<br>')}</td><td>${htmlEsc(item.zoneName)}</td><td class="num">${item.respondents}</td>${REACTION_KEYS.map(k=>`<td class="num react">${item.counts[k]}</td>`).join('')}</tr>`).join('')}</tbody></table><p class="note">※ 合同発表は、関係するそれぞれの学年のページに同じ集計を掲載しています。リアクションは発表グループごとの集計です。</p></section>`).join('');openReactionPrintWindow('OFES_REACTION_BY_GRADE','OFES 学年別リアクションフィードバック',sections,'col.c-group{width:9%}col.c-title{width:32%}col.c-time{width:24%}col.c-place{width:10%}col.c-respond{width:5%}col.c-react{width:4%}.grade-page{min-height:185mm}');});
 
+// -------- Internal audience / annual archives --------
+async function fetchAdminInternal(year){
+  if(!isAdmin()||!year)return null;
+  const { data, error }=await supabase.from('ofes_internal_state').select('payload').eq('year',String(year)).maybeSingle();
+  if(error)throw error;
+  const payload=data?.payload||{presenters:{}};
+  window.dispatchEvent(new CustomEvent('ofes-internal-admin',{detail:{year:String(year),payload}}));
+  return payload;
+}
+async function saveInternalFromDraft(){
+  const internal=window.OFESCloud?.exportInternal?.();if(!internal)return;
+  const { error }=await supabase.rpc('admin_save_ofes_internal',{p_year:String(internal.year||''),p_passcode:String(internal.passcode||''),p_payload:internal.payload||{presenters:{}}});
+  if(error)throw error;
+}
+function installExtendedApis(){
+  window.OFESInternal={
+    verify:async(year,passcode)=>{const {data,error}=await supabase.rpc('verify_ofes_internal_access',{p_year:String(year||''),p_passcode:String(passcode||'')});if(error)throw error;return data||null;}
+  };
+  window.OFESArchives={
+    list:async()=>{if(!isAdmin())throw Error('管理者ログインが必要です。');const {data,error}=await supabase.from('ofes_year_archives').select('year,event_date,updated_at').order('year',{ascending:false});if(error)throw error;return data||[];},
+    save:async(payload)=>{if(!isAdmin())throw Error('管理者ログインが必要です。');if(!payload?.year)throw Error('年度がありません。');const row={year:String(payload.year),event_date:payload.eventDate||null,payload,updated_at:new Date().toISOString(),updated_by:currentUser.id};const {error}=await supabase.from('ofes_year_archives').upsert(row,{onConflict:'year'});if(error)throw error;},
+    load:async(year)=>{if(!isAdmin())throw Error('管理者ログインが必要です。');const {data,error}=await supabase.from('ofes_year_archives').select('payload').eq('year',String(year)).maybeSingle();if(error)throw error;return data?.payload||null;},
+    remove:async(year)=>{if(!isAdmin())throw Error('管理者ログインが必要です。');const {error}=await supabase.from('ofes_year_archives').delete().eq('year',String(year));if(error)throw error;}
+  };
+}
+
 // -------- Publication backup / reaction backup --------
 async function createPublicationBackup(reason='pre-publish'){
   if(!publishedData)return null;if(!isAdmin())throw Error('管理者ログインが必要です。');
-  const row={reason,payload:publishedData,source_year:publishedData.year||'',source_event_date:publishedData.eventDate||null,source_zone_count:publishedData.zones?.length||0,source_program_count:publishedData.programs?.length||0,created_by:currentUser.id};
-  const { data, error }=await supabase.from('ofes_publication_backups').insert(row).select('id,created_at,source_year,source_zone_count,source_program_count,payload').single();if(error)throw error;
-  return {backupId:data.id,createdAtClient:data.created_at,sourceYear:data.source_year,sourceZoneCount:data.source_zone_count,sourceProgramCount:data.source_program_count,data:data.payload};
+  let internalPayload=null;try{internalPayload=await fetchAdminInternal(publishedData.year||'');}catch(error){console.warn('backup internal payload',error);}
+  const row={reason,payload:publishedData,internal_payload:internalPayload,source_year:publishedData.year||'',source_event_date:publishedData.eventDate||null,source_zone_count:publishedData.zones?.length||0,source_program_count:publishedData.programs?.length||0,created_by:currentUser.id};
+  const { data, error }=await supabase.from('ofes_publication_backups').insert(row).select('id,created_at,source_year,source_zone_count,source_program_count,payload,internal_payload').single();if(error)throw error;
+  return {backupId:data.id,createdAtClient:data.created_at,sourceYear:data.source_year,sourceZoneCount:data.source_zone_count,sourceProgramCount:data.source_program_count,data:data.payload,internalPayload:data.internal_payload||null};
 }
 async function refreshPublicationBackupInfo(){
   latestPublicationBackup=null;if(!publicationBackupSummary||!restorePublishedButton)return;restorePublishedButton.disabled=true;
   if(!isAdmin()){publicationBackupSummary.textContent='管理者ログイン後に復元ポイントを確認できます。';if(publicationBackupMessage)publicationBackupMessage.textContent='公開前バックアップは管理者だけが読み書きできます。';return;}
   publicationBackupSummary.textContent='復元ポイントを確認中…';
   try{
-    const { data, error }=await supabase.from('ofes_publication_backups').select('id,created_at,source_year,source_zone_count,source_program_count,payload').order('created_at',{ascending:false}).limit(1).maybeSingle();if(error)throw error;
-    latestPublicationBackup=data?{backupId:data.id,createdAtClient:data.created_at,sourceYear:data.source_year,sourceZoneCount:data.source_zone_count,sourceProgramCount:data.source_program_count,data:data.payload}:null;
+    const { data, error }=await supabase.from('ofes_publication_backups').select('id,created_at,source_year,source_zone_count,source_program_count,payload,internal_payload').order('created_at',{ascending:false}).limit(1).maybeSingle();if(error)throw error;
+    latestPublicationBackup=data?{backupId:data.id,createdAtClient:data.created_at,sourceYear:data.source_year,sourceZoneCount:data.source_zone_count,sourceProgramCount:data.source_program_count,data:data.payload,internalPayload:data.internal_payload||null}:null;
     if(!latestPublicationBackup){publicationBackupSummary.textContent='復元ポイントはまだありません。2回目以降の「Supabaseへ公開」で自動作成されます。';if(publicationBackupMessage)publicationBackupMessage.textContent='初回公開の前には戻す元の公開データがないため、復元ポイントは作成されません。';return;}
     const when=new Date(latestPublicationBackup.createdAtClient).toLocaleString('ja-JP');publicationBackupSummary.textContent=`直前の復元ポイント：${when}／${latestPublicationBackup.sourceYear||'―'}年度／会場${latestPublicationBackup.sourceZoneCount||0}か所／プログラム${latestPublicationBackup.sourceProgramCount||0}件`;if(publicationBackupMessage)publicationBackupMessage.textContent='「直前の公開状態へ戻す」を押すと、この復元ポイントを公開データへ戻します。';restorePublishedButton.disabled=isBusy;
   }catch(error){publicationBackupSummary.textContent=`復元ポイントを確認できませんでした：${errorText(error)}`;if(publicationBackupMessage)publicationBackupMessage.textContent='SupabaseのRLSと管理者UIDを確認してください。';}
@@ -353,10 +381,12 @@ publishButton?.addEventListener('click',async()=>{
   isBusy=true;setUiState();let backupPoint=null;
   try{
     if(publishedData){status(publishMessage,'現在の公開状態を復元ポイントへ自動保存しています…','loading');backupPoint=await createPublicationBackup('pre-publish');}
+    status(publishMessage,'大豊学園関係者用データを安全に保存しています…','loading');
+    await saveInternalFromDraft();
     status(publishMessage,'Supabaseへ公開しています。画面を閉じずにお待ちください…','loading');
     const row={id:'site',payload,event_date:payload.eventDate,reaction_deadline_at:jstDeadlineIso(payload.reactionDeadline),reaction_revision:Number(publishedData?.reactionRevision||0),updated_at:new Date().toISOString(),updated_by:currentUser.id};
     const { error }=await supabase.from('ofes_site_state').upsert(row,{onConflict:'id'});if(error)throw error;
-    await fetchPublished();status(publishMessage,backupPoint?`Supabaseへの公開が完了しました。公開前の復元ポイント ${backupPoint.backupId} も保存しました。`:'Supabaseへの初回公開が完了しました。別の端末でも同じ内容を閲覧できます。','ok');
+    await fetchPublished();await fetchAdminInternal(payload.year);status(publishMessage,backupPoint?`Supabaseへの公開が完了しました。公開前の復元ポイント ${backupPoint.backupId} も保存しました。`:'Supabaseへの初回公開が完了しました。別の端末でも同じ内容を閲覧できます。','ok');
   }catch(error){status(publishMessage,`公開に失敗：${errorText(error)}${publishedData?'（公開前バックアップに失敗した場合、新しい内容は公開していません）':''}`,'error');}
   finally{isBusy=false;setUiState();await refreshPublicationBackupInfo();}
 });
@@ -368,7 +398,8 @@ restorePublishedButton?.addEventListener('click',async()=>{
     if(publishedData){status(publicationBackupMessage,'復元前の現在状態を安全用の復元ポイントへ保存しています…','loading');await createPublicationBackup('pre-restore');}
     status(publicationBackupMessage,'直前の公開状態へ復元しています…','loading');const payload=point.data;if(!payload)throw Error('復元ポイントのデータが不完全です。');
     const { error }=await supabase.from('ofes_site_state').upsert({id:'site',payload,event_date:payload.eventDate,reaction_deadline_at:jstDeadlineIso(payload.reactionDeadline),reaction_revision:Number(publishedData?.reactionRevision||0),updated_at:new Date().toISOString(),updated_by:currentUser.id},{onConflict:'id'});if(error)throw error;
-    await fetchPublished();status(publicationBackupMessage,'直前の公開状態へ復元しました。来場者画面にも反映されます。復元前の状態も保存済みです。','ok');
+    if(point.internalPayload){const {error:internalError}=await supabase.rpc('admin_save_ofes_internal',{p_year:String(payload.year||point.sourceYear||''),p_passcode:'',p_payload:point.internalPayload});if(internalError)throw internalError;}
+    await fetchPublished();await fetchAdminInternal(payload.year||point.sourceYear||'');status(publicationBackupMessage,'直前の公開状態へ復元しました。来場者画面にも反映されます。復元前の状態も保存済みです。','ok');
   }catch(error){status(publicationBackupMessage,`復元に失敗：${errorText(error)}`,'error');}
   finally{isBusy=false;setUiState();await refreshPublicationBackupInfo();}
 });
@@ -378,7 +409,7 @@ loadButton?.addEventListener('click',()=>{if(!publishedData||isBusy)return;if(!c
 try{
   if(typeof createClient!=='function')throw Error('Supabase SDKを読み込めませんでした。');
   if(!configured())throw Error('supabase-config.js の Project URL / Publishable key が未設定です。');
-  supabase=createClient(supabaseConfig.url,supabaseConfig.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+  supabase=createClient(supabaseConfig.url,supabaseConfig.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});installExtendedApis();
   status(sdkStatus,'接続準備完了（Supabase）','ok');status(authStatus,'ログイン状態を確認中…','loading');status(authMessage,'管理者はメールアドレスとパスワードでログインします。');setUiState();
   await fetchPublished();subscribePublished();
   const { data:{ subscription } }=supabase.auth.onAuthStateChange(async(_event,session)=>{await refreshSessionUi(session?.user||null);await restoreCachedReactions();});

@@ -12,6 +12,7 @@ const MAPS = [
 const STORAGE_KEY='ofes-prototype-v08'; // 旧版から維持
 const STAMP_KEY='ofes-stamp-v08';
 const STAMP_BASE_URL='https://otoyoacademy.github.io/Ofes/';
+const ACCESS_MODE_KEY='ofes-access-mode-v127';
 // 試作版の画面ロックのみ。Supabaseの安全な認証には使用しない。
 const DEMO_ADMIN_PASSWORD='ofes0034';
 const SESSION_IDS=['s1','s2','s3','s4'];
@@ -32,12 +33,13 @@ const DEFAULT_DATA = {
  noticeTitle:'おおフェス（OFES）Webアプリのご案内',
  noticeMessage:'今年度のおおフェスでは、プログラムや会場案内などをスマートフォンで確認できるWebアプリ「OFES」をご利用いただけます。会場での移動や発表見学に、ぜひご活用ください。',
  noticeIssuer:'大豊学園',
+ internalPasscode:'', stampCompleteImage:'',
  test:{enabled:false,date:'2026-11-21',time:'09:25'},
  sessions:JSON.parse(JSON.stringify(DEFAULT_SESSIONS)),
  zones:[],safetyItems:[],nextSafetyId:1,nextIds:{campus:1,zenki1:1,zenki2:1,koki1:1,koki2:1,koki3:1},
  programs:[
-  {id:'p1',session:'other',start:'08:45',end:'09:05',grade:'',group:'',title:'開会行事・アトラクション',zoneId:''},
-  {id:'p6',session:'afternoon',start:'13:32',end:'13:38',grade:'',group:'',title:'午後のステージ発表（仮）',zoneId:''}
+  {id:'p1',session:'other',start:'08:45',end:'09:05',grade:'',group:'',title:'開会行事・アトラクション',zoneId:'',presenters:''},
+  {id:'p6',session:'afternoon',start:'13:32',end:'13:38',grade:'',group:'',title:'午後のステージ発表（仮）',zoneId:'',presenters:''}
  ]
 };
 const clone = (v)=>JSON.parse(JSON.stringify(v));
@@ -88,7 +90,7 @@ function validData(v){
  out.programs=v.programs.filter(p=>p&&typeof p.id==='string').map(p=>{
   const session=String(p.session||'other');
   const sd=out.sessions[session];
-  return {id:p.id,reactionId:String(p.reactionId||''),session,start:sd?.start||String(p.start||'09:00'),end:sd?.end||String(p.end||'09:20'),grade:String(p.grade||''),group:String(p.group||''),title:String(p.title||'発表'),zoneId:String(p.zoneId||'')};
+  return {id:p.id,reactionId:String(p.reactionId||''),session,start:sd?.start||String(p.start||'09:00'),end:sd?.end||String(p.end||'09:20'),grade:String(p.grade||''),group:String(p.group||''),title:String(p.title||'発表'),zoneId:String(p.zoneId||''),presenters:String(p.presenters||'')};
  });
  // Ver.1.14: リアクションは「学年 + 発表グループ + 発表内容」を1つの発表単位として扱う。
  // 同じグループが複数セッションで同じ発表を行う場合だけreactionIdを共有する。
@@ -96,6 +98,8 @@ function validData(v){
  out.noticeTitle=String(v.noticeTitle||DEFAULT_DATA.noticeTitle);
  out.noticeMessage=String(v.noticeMessage||DEFAULT_DATA.noticeMessage);
  out.noticeIssuer=String(v.noticeIssuer||DEFAULT_DATA.noticeIssuer);
+ out.internalPasscode=String(v.internalPasscode||'');
+ out.stampCompleteImage=typeof v.stampCompleteImage==='string'?v.stampCompleteImage:'';
  out.nextIds={...clone(DEFAULT_DATA.nextIds),...(v.nextIds||{})};
  out.test={...clone(DEFAULT_DATA.test),...(v.test||{})};
  delete out.gallery;
@@ -117,9 +121,37 @@ const schemaVersion=7;
 function projectPublished(src){
  const safe=validData(src);
  // テスト日時はブラウザ専用。公開データには送らず、全来場者で実時刻を使う。
+ const publicPrograms=safe.programs.map(({presenters,...p})=>p);
  return {schemaVersion,year:safe.year,eventDate:safe.eventDate,slogan:safe.slogan,sessions:clone(safe.sessions),
-   zones:clone(safe.zones),safetyItems:clone(safe.safetyItems),nextSafetyId:safe.nextSafetyId,nextIds:clone(safe.nextIds),programs:clone(safe.programs),reactionDeadline:safe.reactionDeadline,
-   noticeTitle:safe.noticeTitle,noticeMessage:safe.noticeMessage,noticeIssuer:safe.noticeIssuer};
+   zones:clone(safe.zones),safetyItems:clone(safe.safetyItems),nextSafetyId:safe.nextSafetyId,nextIds:clone(safe.nextIds),programs:publicPrograms,reactionDeadline:safe.reactionDeadline,
+   noticeTitle:safe.noticeTitle,noticeMessage:safe.noticeMessage,noticeIssuer:safe.noticeIssuer,stampCompleteImage:safe.stampCompleteImage};
+}
+function projectInternal(src){
+ const safe=validData(src);
+ const presenters={};
+ for(const p of safe.programs){const names=String(p.presenters||'').trim();if(names)presenters[p.id]=names;}
+ return {year:safe.year,passcode:String(safe.internalPasscode||''),payload:{presenters}};
+}
+function projectArchive(src){
+ const safe=validData(src);
+ const archived=clone(safe);
+ archived.internalPasscode='';
+ archived.test={enabled:false,date:archived.eventDate,time:'09:25'};
+ return archived;
+}
+let internalPresenterMap={};
+let adminInternalPayload=null;
+let audienceMode='';
+function currentPresenterNames(p){
+ if(editorActive)return String(p.presenters||'').trim();
+ if(audienceMode==='internal')return String(internalPresenterMap?.[p.id]||'').trim();
+ return '';
+}
+function presentersHtml(p,compact=false){const names=currentPresenterNames(p);return names?`<div class="program-presenters ${compact?'compact':''}"><span>児童生徒</span>${esc(names)}</div>`:'';}
+function applyAdminInternalToDraft(){
+ const map=adminInternalPayload?.presenters||{};
+ if(!map||typeof map!=='object')return;
+ for(const p of draftState.programs||[]){if(map[p.id]&&!p.presenters)p.presenters=String(map[p.id]);}
 }
 function acceptPublished(doc){
  try {
@@ -135,19 +167,24 @@ function switchDraft(){
   draftState=clone(publishedState);
   localStorage.setItem(STORAGE_KEY,JSON.stringify(draftState));
  }
+ applyAdminInternalToDraft();
  state=draftState;
 }
 function closeDraft(){editorActive=false;state=demoDraftPreview?draftState:(publishedState||draftState);renderPublic();}
 window.OFESCloud={
   exportPublished:()=>projectPublished(draftState),
+  exportInternal:()=>projectInternal(draftState),
+  exportArchive:()=>projectArchive(draftState),
   publishedSummary:()=>({exists:cloudAvailable,year:publishedState?.year,zones:publishedState?.zones.length||0,programs:publishedState?.programs.length||0}),
   importPublishedAsDraft:()=>{
    if(!publishedState)throw Error('Supabaseにはまだ公開データがありません。');
-   draftState=clone(publishedState);state=draftState;persist();editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
+   draftState=clone(publishedState);applyAdminInternalToDraft();state=draftState;persist();editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
    renderAdmin();renderPublic();toast('Supabaseの公開データを編集用に読み込みました');
   }
 };
 window.addEventListener('ofes-cloud-published',e=>acceptPublished(e.detail?.data??null));
+window.addEventListener('ofes-internal-admin',e=>{adminInternalPayload=e.detail?.payload||null;if(editorActive){applyAdminInternalToDraft();state=draftState;persist();renderAdminPrograms();}});
+window.addEventListener('ofes-internal-access',e=>{internalPresenterMap=e.detail?.payload?.presenters||{};audienceMode='internal';sessionStorage.setItem(ACCESS_MODE_KEY,'internal');hideEntryGate();renderPublic();renderTv();});
 
 let visitorBuilding='campus',session='current',visitorSelected='';
 let programReturnScrollY=0;
@@ -191,8 +228,8 @@ function renderHeader(){
  byId('countdown').textContent=dif>0?`開催まであと ${dif} 日`:dif===0?'いよいよ本日！':'今年のおおフェスは終了しました';
  const v=viewTime();byId('previewTag').hidden=!v.demo;byId('previewTag').textContent=`TEST ${v.date} ${v.time}`;
 }
-function setTab(tab,opts={}){if(tab!=='stamp'&&stampScannerActive)closeStampScanner();$$('.nav').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$$('.tab-view').forEach(v=>v.classList.toggle('active',v.id===`tab-${tab}`));if(tab==='venues')renderVisitorMap();if(opts.scrollTop!==false)window.scrollTo({top:0,behavior:'smooth'});}
-$$('.nav').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+function setTab(tab,opts={}){if(tab!=='stamp'&&stampScannerActive)closeStampScanner();$$('.nav[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$$('.tab-view').forEach(v=>v.classList.toggle('active',v.id===`tab-${tab}`));if(tab==='venues')renderVisitorMap();if(opts.scrollTop!==false)window.scrollTo({top:0,behavior:'smooth'});}
+$$('.nav[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 function renderProgram(){
  const filteredOrdered=orderedPrograms();
  const v=viewTime(),active=activePrograms();
@@ -224,7 +261,7 @@ function renderProgram(){
    const d=sessionDef(unit.sid);
    const statuses=unit.programs.map(programStatus);
    const st=statuses.some(x=>x.key==='live')?{key:'live',label:'発表中'}:(statuses.every(x=>x.key==='ended')?{key:'ended',label:'終了しました'}:{key:'upcoming',label:'発表予定'});
-   const items=unit.programs.slice().sort((a,b)=>String(roomLabel(a)).localeCompare(String(roomLabel(b)))).map(p=>`<div class="session-program-item"><div class="session-program-main"><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong><div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`).join('');
+   const items=unit.programs.slice().sort((a,b)=>String(roomLabel(a)).localeCompare(String(roomLabel(b)))).map(p=>`<div class="session-program-item"><div class="session-program-main"><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`).join('');
    return `<details class="program-session-group ${st.key==='live'?'on':''}" ${st.key==='live'?'open':''}><summary class="program-session-summary"><span class="time">${esc(d.start)}</span><span class="session-summary-main"><strong>${esc(d.label)}</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(d.start)}〜${esc(d.end)}　${unit.programs.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
   }
   if(unit.type==='afternoon-group'){
@@ -233,11 +270,11 @@ function renderProgram(){
    const anyLive=ps.some(p=>programStatus(p).key==='live');
    const allEnded=ps.every(p=>programStatus(p).key==='ended');
    const st=anyLive?{key:'live',label:'発表中'}:(allEnded?{key:'ended',label:'終了しました'}:{key:'upcoming',label:'発表予定'});
-   const items=ps.map(p=>{const pt=programTimes(p),pst=programStatus(p);return `<div class="session-program-item"><div class="session-program-main"><div class="afternoon-program-time">${esc(pt.start)}〜${esc(pt.end)} <span class="program-status status-${pst.key}">${pst.label}</span></div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong><div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`}).join('');
+   const items=ps.map(p=>{const pt=programTimes(p),pst=programStatus(p);return `<div class="session-program-item"><div class="session-program-main"><div class="afternoon-program-time">${esc(pt.start)}〜${esc(pt.end)} <span class="program-status status-${pst.key}">${pst.label}</span></div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`}).join('');
    return `<details class="program-session-group afternoon-program-group ${st.key==='live'?'on':''}" ${st.key==='live'?'open':''}><summary class="program-session-summary"><span class="time">${esc(first.start)}</span><span class="session-summary-main"><strong>午後の有志発表</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(first.start)}〜${esc(last.end)}　${ps.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
   }
   const p=unit.p,pt=programTimes(p),st=programStatus(p);
-  return `<div class="program-row ${st.key==='live'?'on':''}"><div class="time">${esc(pt.start)}</div><div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong><span class="program-status status-${st.key}">${st.label}</span><div class="where">${esc(sessionLabel(p.session))}　${esc(pt.start)}〜${esc(pt.end)}　${esc(roomLabel(p))} <button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div></div></div>`;
+  return `<div class="program-row ${st.key==='live'?'on':''}"><div class="time">${esc(pt.start)}</div><div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<span class="program-status status-${st.key}">${st.label}</span><div class="where">${esc(sessionLabel(p.session))}　${esc(pt.start)}〜${esc(pt.end)}　${esc(roomLabel(p))} <button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div></div></div>`;
  }).join('');
  $$('[data-see]').forEach(b=>b.onclick=()=>{
   if(!b.dataset.see)return;
@@ -307,7 +344,7 @@ function floorDetailHtml(m){
  ps.sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||timeNum(programTimes(a).end)-timeNum(programTimes(b).end)||String(a.id).localeCompare(String(b.id)));
  return `<h4>${esc(z.name)} <span class="pill">${esc(z.id)}</span></h4>${z.note?`<p>${esc(z.note)}</p>`:''}
  <p class="muted">${esc(m.name)}　登録されている発表：${ps.length}件</p>
- ${ps.length?`<div class="venue-program-list">${ps.map(p=>{const pt=programTimes(p),st=programStatus(p);return `<article class="venue-program-item status-border-${st.key}"><div class="venue-program-meta"><span class="program-status status-${st.key}">${st.label}</span><strong>${esc(sessionLabel(p.session))}</strong><span>${esc(pt.start)}〜${esc(pt.end)}</span></div><div class="venue-program-title">${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</div>${SESSION_IDS.includes(p.session)?reactionsHtml(p):''}</article>`}).join('')}</div>`:'<p>この会場のプログラムはまだ登録されていません。</p>'}`;
+ ${ps.length?`<div class="venue-program-list">${ps.map(p=>{const pt=programTimes(p),st=programStatus(p);return `<article class="venue-program-item status-border-${st.key}"><div class="venue-program-meta"><span class="program-status status-${st.key}">${st.label}</span><strong>${esc(sessionLabel(p.session))}</strong><span>${esc(pt.start)}〜${esc(pt.end)}</span></div><div class="venue-program-title">${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</div>${presentersHtml(p)}${SESSION_IDS.includes(p.session)?reactionsHtml(p):''}</article>`}).join('')}</div>`:'<p>この会場のプログラムはまだ登録されていません。</p>'}`;
 }
 function updateSelectedFloorDetails(){
  $$('#visitorMaps [data-zone]').forEach(b=>{
@@ -439,6 +476,8 @@ function renderStamps(){
    : `<strong>獲得スタンプ：${a.length} / 5</strong><span>あと ${5-a.length} 個です。</span>`;
  }
  byId('stampCards').innerHTML=[1,2,3,4,5].map(i=>`<div class="stamp-item ${a.includes(i)?'got':''}"><div class="star">⭐</div><b>STAMP ${i}</b><small>${a.includes(i)?'取得済み':'未取得'}</small></div>`).join('');
+ const panel=byId('stampCompletePanel'),img=byId('stampCompleteImage');
+ if(panel){panel.hidden=a.length!==5;if(a.length===5){if(state.stampCompleteImage){img.src=state.stampCompleteImage;img.hidden=false;}else{img.removeAttribute('src');img.hidden=true;}}}
 }
 function parseStampQrValue(value){
  try{
@@ -605,16 +644,74 @@ for(const container of [byId('programList'),byId('visitorMaps')]){
  });
 }
 
-function renderPublic(){renderHeader();renderProgram();renderVisitorMap();renderStamps();}
+function renderAudienceMode(){
+ const chip=byId('audienceMode');if(!chip)return;
+ const label=audienceMode==='internal'?'大豊学園':audienceMode==='admin'?'管理者':'一般来場者';
+ chip.textContent=label;chip.classList.toggle('internal',audienceMode==='internal');
+}
+function showEntryGate(){byId('entryGate').hidden=false;byId('internalLoginForm').hidden=true;byId('internalLoginMessage').textContent='';}
+function hideEntryGate(){byId('entryGate').hidden=true;}
+function choosePublic(){audienceMode='public';internalPresenterMap={};sessionStorage.setItem(ACCESS_MODE_KEY,'public');hideEntryGate();renderPublic();}
+byId('enterPublic')?.addEventListener('click',choosePublic);
+byId('openInternalLogin')?.addEventListener('click',()=>{byId('internalLoginForm').hidden=false;byId('internalPasscodeInput').value='';byId('internalLoginMessage').textContent='';byId('internalPasscodeInput').focus();});
+byId('cancelInternalLogin')?.addEventListener('click',()=>{byId('internalLoginForm').hidden=true;byId('internalLoginMessage').textContent='';});
+byId('internalLoginForm')?.addEventListener('submit',async e=>{e.preventDefault();const pass=byId('internalPasscodeInput').value.trim(),msg=byId('internalLoginMessage');if(!pass)return;msg.textContent='確認しています…';try{if(!window.OFESInternal?.verify)throw Error('Supabase接続準備中です。少し待ってからもう一度お試しください。');const payload=await window.OFESInternal.verify(state.year,pass);if(!payload)throw Error('パスコードが正しくありません。');internalPresenterMap=payload.presenters||{};audienceMode='internal';sessionStorage.setItem(ACCESS_MODE_KEY,'internal');hideEntryGate();renderPublic();}catch(err){msg.textContent=err.message||'パスコードを確認できませんでした。';}});
+byId('backToEntry')?.addEventListener('click',()=>{audienceMode='';internalPresenterMap={};sessionStorage.removeItem(ACCESS_MODE_KEY);showEntryGate();renderAudienceMode();});
+byId('entryAdmin')?.addEventListener('click',()=>{hideEntryGate();byId('openAdmin').click();});
+
+function tvPeople(p){const names=currentPresenterNames(p);const publicPeople=[p.grade,p.group].filter(Boolean).join(' ');return names?`${publicPeople}${publicPeople?' / ':''}${names}`:(publicPeople||'発表者');}
+function tvProgramCard(p){const pt=programTimes(p);return `<article class="tv-program-card"><div class="tv-time">${esc(pt.start)}〜${esc(pt.end)}</div><h2>${esc(p.title)}</h2><div class="tv-meta"><span>📍 ${esc(roomLabel(p))}</span><span>👥 ${esc(tvPeople(p))}</span></div></article>`;}
+function renderTv(){
+ const panel=byId('tvPanel');if(!panel||panel.hidden)return;
+ byId('tvYear').textContent=state.year;byId('tvSlogan').textContent=state.slogan;
+ const v=viewTime();byId('tvClock').textContent=`${v.date.replaceAll('-','/')} ${v.time}`;
+ const content=byId('tvContent');const all=orderedPrograms();
+ if(v.date<state.eventDate){const now=new Date(v.date+'T00:00:00'),event=new Date(state.eventDate+'T00:00:00'),days=Math.max(0,Math.round((event-now)/86400000));content.innerHTML=`<div class="tv-message countdown"><span>おおフェスまで</span><strong>あと ${days} 日</strong><p>${esc(jpEventDate(state.eventDate))}</p></div>`;return;}
+ if(v.date>state.eventDate){content.innerHTML='<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>';return;}
+ const active=activePrograms();if(active.length){content.innerHTML=`<div class="tv-kicker">ただいま開催中</div><div class="tv-program-grid">${active.map(tvProgramCard).join('')}</div>`;return;}
+ const starts=all.map(p=>timeNum(programTimes(p).start));const ends=all.map(p=>timeNum(programTimes(p).end));const first=starts.length?Math.min(...starts):9999,last=ends.length?Math.max(...ends):-1;
+ const deadlineTime=state.reactionDeadline?.startsWith(state.eventDate)?timeNum(state.reactionDeadline.slice(11,16)):17*60;
+ if(v.minute<first){content.innerHTML='<div class="tv-message"><strong>本日、おおフェス開催！</strong><p>まもなくプログラムが始まります。</p></div>';return;}
+ if(v.minute>=last){if(v.minute<deadlineTime){content.innerHTML=`<div class="tv-message reaction"><strong>本日のプログラムは終了しました。</strong><p>リアクションは <b>${esc(state.reactionDeadline.slice(11,16))}</b> まで受付中です。<br>ぜひ発表への感想を届けてください。</p></div>`;}else{content.innerHTML='<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>';}return;}
+ const next=all.filter(p=>timeNum(programTimes(p).start)>v.minute);const nextStart=next.length?Math.min(...next.map(p=>timeNum(programTimes(p).start))):null;const group=nextStart===null?[]:next.filter(p=>timeNum(programTimes(p).start)===nextStart);content.innerHTML=`<div class="tv-kicker">次のプログラム</div><div class="tv-program-grid">${group.map(tvProgramCard).join('')}</div>`;
+}
+byId('openTv')?.addEventListener('click',()=>{byId('tvPanel').hidden=false;renderTv();});
+byId('closeTv')?.addEventListener('click',()=>{byId('tvPanel').hidden=true;if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
+byId('tvLandscape')?.addEventListener('click',()=>{byId('tvPanel').classList.add('tv-landscape');byId('tvPanel').classList.remove('tv-portrait');byId('tvLandscape').classList.add('active');byId('tvPortrait').classList.remove('active');});
+byId('tvPortrait')?.addEventListener('click',()=>{byId('tvPanel').classList.add('tv-portrait');byId('tvPanel').classList.remove('tv-landscape');byId('tvPortrait').classList.add('active');byId('tvLandscape').classList.remove('active');});
+byId('tvFullscreen')?.addEventListener('click',async()=>{try{if(!document.fullscreenElement)await byId('tvPanel').requestFullscreen();else await document.exitFullscreen();}catch{}});
+
+async function compressStampImage(file){
+ if(!file?.type?.startsWith('image/'))throw Error('画像ファイルを選択してください。');
+ const url=URL.createObjectURL(file);try{const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url;});const max=1000,scale=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.naturalWidth*scale));c.height=Math.max(1,Math.round(img.naturalHeight*scale));const ctx=c.getContext('2d');ctx.drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.82);}finally{URL.revokeObjectURL(url);}
+}
+byId('stampCompleteImageFile')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;const msg=byId('stampCompleteImageMessage');msg.textContent='画像を調整しています…';try{state.stampCompleteImage=await compressStampImage(f);if(!persist())throw Error('ブラウザへ保存できませんでした。');renderStampQrAdmin();renderStamps();msg.textContent='画像を保存しました。「データ保存」からSupabaseへ公開すると来場者にも反映されます。';}catch(err){msg.textContent=`画像を保存できませんでした：${err.message}`;}finally{e.target.value='';}});
+byId('removeStampCompleteImage')?.addEventListener('click',()=>{if(!state.stampCompleteImage)return;state.stampCompleteImage='';persist();renderStampQrAdmin();renderStamps();byId('stampCompleteImageMessage').textContent='画像を削除しました。';});
+
+async function renderYearArchives(){
+ const box=byId('yearArchiveList'),msg=byId('yearArchiveMessage');if(!box)return;
+ if(!window.OFESArchives){box.innerHTML='<p class="muted">Supabase接続を準備しています…</p>';return;}
+ try{const rows=await window.OFESArchives.list();box.innerHTML=rows.length?rows.map(r=>`<article class="year-archive-item"><div><strong>${esc(r.year)}年度</strong><span>${r.event_date?esc(r.event_date):''}</span><small>更新：${r.updated_at?new Date(r.updated_at).toLocaleString('ja-JP'):''}</small></div><div class="row-actions"><button type="button" class="btn light" data-year-view="${esc(r.year)}">内容を見る</button><button type="button" class="btn light" data-year-copy="${esc(r.year)}">前年度としてコピー</button><button type="button" class="btn danger" data-year-delete="${esc(r.year)}">削除</button></div></article>`).join(''):'<p class="muted">保存済みの年度データはありません。</p>';
+ box.querySelectorAll('[data-year-view]').forEach(b=>b.onclick=()=>previewYearArchive(b.dataset.year));box.querySelectorAll('[data-year-copy]').forEach(b=>b.onclick=()=>copyYearArchive(b.dataset.year));box.querySelectorAll('[data-year-delete]').forEach(b=>b.onclick=()=>deleteYearArchive(b.dataset.year));if(msg)msg.textContent=`保存済み年度：${rows.length}件`;
+ }catch(err){box.innerHTML=`<p class="error">一覧を取得できません：${esc(err.message||err)}</p>`;}
+}
+async function previewYearArchive(year){try{const payload=await window.OFESArchives.load(year);if(!payload)throw Error('年度データが見つかりません。');const data=validData(payload),box=byId('yearArchivePreview');const list=orderedArchivePrograms(data);box.hidden=false;box.innerHTML=`<div class="year-preview-head"><div><strong>${esc(data.year)}年度</strong><span>${esc(data.eventDate)}　${esc(data.slogan)}</span></div><button type="button" class="btn light" id="closeYearPreview">閉じる</button></div><p>会場 ${data.zones.length}か所 ／ プログラム ${data.programs.length}件</p><div class="year-preview-programs">${list.map(p=>{const d=data.sessions?.[p.session],start=d?.start||p.start,end=d?.end||p.end;const zone=data.zones.find(z=>z.id===p.zoneId)?.name||'会場未設定';return `<article><time>${esc(start)}〜${esc(end)}</time><div><strong>${esc(p.title)}</strong><span>${esc([p.grade,p.group].filter(Boolean).join(' '))}</span><small>${esc(zone)}</small></div></article>`;}).join('')}</div>`;byId('closeYearPreview').onclick=()=>{box.hidden=true;};}catch(err){alert(`年度データを表示できませんでした：${err.message||err}`);}}
+function orderedArchivePrograms(data){return [...data.programs].sort((a,b)=>{const sa=data.sessions?.[a.session]?.start||a.start||'99:99',sb=data.sessions?.[b.session]?.start||b.start||'99:99';return timeNum(sa)-timeNum(sb)||String(a.id).localeCompare(String(b.id));});}
+async function copyYearArchive(year){try{const payload=await window.OFESArchives.load(year);if(!payload)throw Error('年度データが見つかりません。');const defaultYear=String(Number(year)+1||state.year);const newYear=prompt(`${year}年度の内容をコピーします。新しい年度を入力してください。`,defaultYear);if(!newYear)return;const newDate=prompt('新しい開催日を YYYY-MM-DD で入力してください。',`${newYear}-11-01`);if(!/^\d{4}-\d{2}-\d{2}$/.test(newDate||''))return alert('開催日の形式が正しくありません。');const next=validData(payload);next.year=newYear;next.eventDate=newDate;next.reactionDeadline=`${newDate}T17:00`;next.internalPasscode='';next.test={enabled:false,date:newDate,time:'09:25'};draftState=next;state=draftState;editorActive=true;persist();renderAdmin();renderPublic();alert(`${year}年度を${newYear}年度の下書きとしてコピーしました。パスコードと開催内容を確認してから公開してください。`);}catch(err){alert(`コピーできませんでした：${err.message||err}`);}}
+async function deleteYearArchive(year){if(!confirm(`${year}年度の保存データを削除しますか？\nこの操作は元に戻せません。`))return;try{await window.OFESArchives.remove(year);await renderYearArchives();}catch(err){alert(`削除できませんでした：${err.message||err}`);}}
+byId('saveYearArchive')?.addEventListener('click',async()=>{const msg=byId('yearArchiveMessage');try{if(!window.OFESArchives)throw Error('Supabase接続準備中です。');if(!confirm(`${state.year}年度の現在の下書きを年度データとして保存しますか？`))return;await window.OFESArchives.save(projectArchive(draftState));msg.textContent=`${state.year}年度を保存しました。`;await renderYearArchives();}catch(err){msg.textContent=`保存できませんでした：${err.message||err}`;}});
+byId('refreshYearArchives')?.addEventListener('click',renderYearArchives);
+
+function renderPublic(){renderHeader();renderProgram();renderVisitorMap();renderStamps();renderAudienceMode();if(!byId('tvPanel').hidden)renderTv();}
 
 // 管理画面へのアクセスはブラウザ試作用の簡易パスワード。外部の書込権限には用いない。
 byId('openAdmin').onclick=()=>{reactionPreviewMode=false;reactionPreviewProgram=null;byId('loginModal').hidden=false;byId('adminPassword').value='';byId('loginError').textContent='';byId('adminPassword').focus()};
 byId('cancelLogin').onclick=()=>byId('loginModal').hidden=true;
 byId('loginForm').onsubmit=e=>{e.preventDefault();if(byId('adminPassword').value!==DEMO_ADMIN_PASSWORD){byId('loginError').textContent='パスワードが違います。';return}
  byId('loginModal').hidden=true;switchDraft();byId('adminPanel').hidden=false;renderPublic();renderAdmin();};
-byId('closeAdmin').onclick=()=>{byId('adminPanel').hidden=true;drawMode='';closeDraft()};
-$$('#adminNav button').forEach(b=>b.onclick=()=>{const t=b.dataset.admin;$$('#adminNav button').forEach(x=>x.classList.toggle('active',x===b));$$('.admin-page').forEach(x=>x.classList.toggle('active',x.id===`admin-${t}`));if(t==='venues')renderEditor();if(t==='program')renderAdminPrograms();if(t==='basic')renderBasic();if(t==='notice')renderNotice();if(t==='stampqr')renderStampQrAdmin();});
-function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');byId('adminMapSelect').value=adminMap;renderEditor();renderAdminPrograms();renderBasic();renderNotice();renderStampQrAdmin();}
+byId('closeAdmin').onclick=()=>{byId('adminPanel').hidden=true;drawMode='';closeDraft();if(!audienceMode)showEntryGate();};
+$$('#adminNav button').forEach(b=>b.onclick=()=>{const t=b.dataset.admin;$$('#adminNav button').forEach(x=>x.classList.toggle('active',x===b));$$('.admin-page').forEach(x=>x.classList.toggle('active',x.id===`admin-${t}`));if(t==='venues')renderEditor();if(t==='program')renderAdminPrograms();if(t==='basic')renderBasic();if(t==='notice')renderNotice();if(t==='stampqr')renderStampQrAdmin();if(t==='years')renderYearArchives();});
+function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');byId('adminMapSelect').value=adminMap;renderEditor();renderAdminPrograms();renderBasic();renderNotice();renderStampQrAdmin();renderYearArchives();}
 byId('adminMapSelect').onchange=e=>{adminMap=e.target.value;editId='';editDraft=null;selectedSafetyId='';drawMode='';renderEditor()};
 function renderEditor(){
  const m=getMap(adminMap);byId('adminMapSelect').value=adminMap;byId('adminMapImage').src=m.src;byId('adminMapImage').alt=m.name;
@@ -742,16 +839,16 @@ function renderAdminPrograms(){
  byId('adminPrograms').innerHTML=`
  <div class="editor-card program-step-card"><div class="step-title"><span>1</span><div><h3>セッション①〜④の時間帯</h3><p class="muted">ここで設定した時間が、同じセッションを選んだすべての会場に共通で適用されます。</p></div></div>
  <div class="session-time-grid">${SESSION_IDS.map(id=>{const d=sessionDef(id);return `<div class="session-time-row" data-session-setting="${id}"><strong>${esc(d.label)}</strong><label>開始<input type="time" data-session-time="start" value="${esc(d.start)}"></label><label>終了<input type="time" data-session-time="end" value="${esc(d.end)}"></label></div>`}).join('')}</div></div>
- <div class="editor-card program-step-card"><div class="step-title"><span>2</span><div><h3>会場ごとの発表登録</h3><p class="muted">会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。開始・終了時刻は上の設定から自動で入ります。</p><p class="caption">発表学年は「7年生・8年生」「7・8年生」「6〜9年生」のように入力できます。学年欄を空欄にしたプログラムは全体行事として扱い、来場者がどの学年を選んでも表示します。</p></div></div>
+ <div class="editor-card program-step-card"><div class="step-title"><span>2</span><div><h3>会場ごとの発表登録</h3><p class="muted">会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。開始・終了時刻は上の設定から自動で入ります。</p><p class="caption">発表学年は「7年生・8年生」「7・8年生」「6〜9年生」のように入力できます。児童生徒名は専用欄へ入力し、一般来場者には表示しません。</p></div></div>
  <label class="venue-program-selector">会場<select id="programVenueSelect">${state.zones.length?state.zones.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(z=>`<option value="${esc(z.id)}" ${z.id===adminProgramVenue?'selected':''}>${esc(z.id)}｜${esc(z.name)}</option>`).join(''):'<option value="">先に会場を登録してください</option>'}</select></label>
  <div class="venue-program-editor">${selectedZone?`<div class="venue-program-admin-heading"><strong>${esc(selectedZone.name)}</strong><span>${esc(selectedZone.id)}</span></div>${venuePrograms.length?venuePrograms.map(p=>adminVenueProgramRow(p)).join(''):'<p class="muted">この会場には、まだ発表が登録されていません。</p>'}<button type="button" id="addVenueProgram" class="btn light">＋ この会場に発表を登録</button>`:'<p class="muted">「会場・配置図」で会場を登録すると、ここから発表を追加できます。</p>'}</div></div>
  ${unassigned.length?`<div class="editor-card"><h3>会場未設定の発表</h3><p class="muted">旧バージョンから引き継いだ発表などです。会場を選択すると上の会場別登録へ移ります。</p><div class="legacy-program-list">${unassigned.map(p=>adminUnassignedRow(p)).join('')}</div></div>`:''}
  <details class="editor-card other-programs"><summary>開会行事・午後など、セッション以外の全体プログラム</summary><p class="muted">午後の体育館行事は「午後（プログラムでリアクション）」を選ぶと、来場者のプログラム画面にリアクションアイコンを表示します。</p><div class="admin-program-list">${other.map(p=>adminOtherProgramRow(p)).join('')}</div><div class="row-actions"><button type="button" id="addAfternoonProgram" class="btn light">＋ 午後プログラムを追加</button><button type="button" id="addOtherProgram" class="btn light">＋ その他の全体プログラムを追加</button></div></details>`;
  bindAdminProgramEvents();
 }
-function adminVenueProgramRow(p){return `<div class="venue-program-admin-row" data-program="${esc(p.id)}"><label>セッション<select data-vpfield="session">${sessionOptions(p.session)}</select></label><label>発表学年（複数可）<input data-vpfield="grade" maxlength="40" placeholder="例：7年生・8年生" value="${esc(p.grade||'')}"></label><label>発表グループ<input data-vpfield="group" maxlength="40" placeholder="例：A班・1班" value="${esc(p.group||'')}"></label><label class="program-content-field">発表内容<input data-vpfield="title" maxlength="160" placeholder="発表内容を入力" value="${esc(p.title)}"></label><div class="derived-time">${esc(programTimes(p).start)}〜${esc(programTimes(p).end)}</div><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button></div>`}
-function adminUnassignedRow(p){return `<div class="venue-program-admin-row legacy" data-program="${esc(p.id)}"><label>会場<select data-vpfield="zoneId">${roomOptions('')}</select></label><label>セッション<select data-vpfield="session">${sessionOptions(p.session)}</select></label><label>発表学年<input data-vpfield="grade" maxlength="40" value="${esc(p.grade||'')}"></label><label>発表グループ<input data-vpfield="group" maxlength="40" value="${esc(p.group||'')}"></label><label class="program-content-field">発表内容<input data-vpfield="title" maxlength="160" value="${esc(p.title)}"></label><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button></div>`}
-function adminOtherProgramRow(p){return `<div class="admin-program-row whole-program-row" data-program="${esc(p.id)}"><label>区分<select data-opfield="session"><option value="afternoon" ${p.session==='afternoon'?'selected':''}>午後（リアクション対象）</option><option value="other" ${p.session!=='afternoon'?'selected':''}>その他（リアクションなし）</option></select></label><label>開始<input type="time" data-opfield="start" value="${esc(p.start)}"></label><label>終了<input type="time" data-opfield="end" value="${esc(p.end)}"></label><label>発表学年<input data-opfield="grade" maxlength="40" placeholder="例：7年生・8年生" value="${esc(p.grade||'')}"></label><label>グループ<input data-opfield="group" maxlength="40" placeholder="例：合同A班" value="${esc(p.group||'')}"></label><label>内容<input data-opfield="title" maxlength="120" value="${esc(p.title)}"></label><label>会場<select data-opfield="zoneId">${roomOptions(p.zoneId)}</select></label><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button></div>`}
+function adminVenueProgramRow(p){return `<div class="venue-program-admin-row" data-program="${esc(p.id)}"><label>セッション<select data-vpfield="session">${sessionOptions(p.session)}</select></label><label>発表学年（複数可）<input data-vpfield="grade" maxlength="40" placeholder="例：7年生・8年生" value="${esc(p.grade||'')}"></label><label>発表グループ<input data-vpfield="group" maxlength="40" placeholder="例：A班・1班" value="${esc(p.group||'')}"></label><label class="program-content-field">発表内容<input data-vpfield="title" maxlength="160" placeholder="発表内容を入力" value="${esc(p.title)}"></label><label class="program-presenters-field">児童生徒名（大豊学園のみ）<input data-vpfield="presenters" maxlength="300" placeholder="例：山田○○、田中○○" value="${esc(p.presenters||'')}"></label><div class="derived-time">${esc(programTimes(p).start)}〜${esc(programTimes(p).end)}</div><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button></div>`}
+function adminUnassignedRow(p){return `<div class="venue-program-admin-row legacy" data-program="${esc(p.id)}"><label>会場<select data-vpfield="zoneId">${roomOptions('')}</select></label><label>セッション<select data-vpfield="session">${sessionOptions(p.session)}</select></label><label>発表学年<input data-vpfield="grade" maxlength="40" value="${esc(p.grade||'')}"></label><label>発表グループ<input data-vpfield="group" maxlength="40" value="${esc(p.group||'')}"></label><label class="program-content-field">発表内容<input data-vpfield="title" maxlength="160" value="${esc(p.title)}"></label><label>児童生徒名（大豊学園のみ）<input data-vpfield="presenters" maxlength="300" value="${esc(p.presenters||'')}"></label><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button></div>`}
+function adminOtherProgramRow(p){return `<div class="admin-program-row whole-program-row" data-program="${esc(p.id)}"><label>区分<select data-opfield="session"><option value="afternoon" ${p.session==='afternoon'?'selected':''}>午後（リアクション対象）</option><option value="other" ${p.session!=='afternoon'?'selected':''}>その他（リアクションなし）</option></select></label><label>開始<input type="time" data-opfield="start" value="${esc(p.start)}"></label><label>終了<input type="time" data-opfield="end" value="${esc(p.end)}"></label><label>発表学年<input data-opfield="grade" maxlength="40" placeholder="例：7年生・8年生" value="${esc(p.grade||'')}"></label><label>グループ<input data-opfield="group" maxlength="40" placeholder="例：合同A班" value="${esc(p.group||'')}"></label><label>内容<input data-opfield="title" maxlength="120" value="${esc(p.title)}"></label><label>児童生徒名（大豊学園のみ）<input data-opfield="presenters" maxlength="300" value="${esc(p.presenters||'')}"></label><label>会場<select data-opfield="zoneId">${roomOptions(p.zoneId)}</select></label><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button></div>`}
 function demoVenuePool(){
  const excluded=/(廊下|階段|トイレ|便所|エレベーター|入口|玄関|駐車)/;
  const eligible=state.zones.filter(z=>!['building','parking'].includes(z.kind));
@@ -898,17 +995,18 @@ function bindAdminProgramEvents(){
  $$('[data-vpfield]').forEach(el=>el.addEventListener('change',e=>{const row=e.target.closest('[data-program]'),p=state.programs.find(x=>x.id===row.dataset.program);if(!p)return;const field=e.target.dataset.vpfield,old=p[field];p[field]=e.target.value;if(field==='session'){const d=sessionDef(p.session);p.start=d.start;p.end=d.end;}if(hasDuplicateVenueSession(p)){alert('同じ会場の同じセッションには、すでに別の発表が登録されています。');p[field]=old;renderAdminPrograms();return;}if(field==='zoneId'&&p.zoneId)adminProgramVenue=p.zoneId;persist();renderAdminPrograms();renderPublic();toast('発表内容を保存しました')}));
  $$('[data-opfield]').forEach(el=>el.addEventListener('change',e=>{const row=e.target.closest('[data-program]'),p=state.programs.find(x=>x.id===row.dataset.program);if(!p)return;p[e.target.dataset.opfield]=e.target.value;persist();renderPublic();toast('全体プログラムを保存しました')}));
  $$('[data-del-program]').forEach(el=>el.onclick=()=>{if(!confirm('この発表を削除しますか？'))return;state.programs=state.programs.filter(p=>p.id!==el.dataset.delProgram);persist();renderAdminPrograms();renderPublic()});
- byId('addVenueProgram')?.addEventListener('click',()=>{if(!adminProgramVenue)return;const used=new Set(sessionProgramsForVenue(adminProgramVenue).map(p=>p.session));const sid=SESSION_IDS.find(id=>!used.has(id));if(!sid){alert('この会場にはセッション①〜④がすべて登録されています。');return;}const d=sessionDef(sid);state.programs.push({id:'p'+Date.now(),reactionId:'',session:sid,start:d.start,end:d.end,grade:'',group:'',title:'',zoneId:adminProgramVenue});persist();renderAdminPrograms();renderPublic();toast(`${sessionLabel(sid)}の入力欄を追加しました`)});
- byId('addAfternoonProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'afternoon',start:'13:00',end:'13:20',grade:'',group:'',title:'新しい午後プログラム',zoneId:''});persist();renderAdminPrograms();renderPublic();toast('午後プログラムを追加しました')});
- byId('addOtherProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'other',start:'08:30',end:'08:50',grade:'',group:'',title:'新しい全体プログラム',zoneId:''});persist();renderAdminPrograms();renderPublic();toast('全体プログラムを追加しました')});
+ byId('addVenueProgram')?.addEventListener('click',()=>{if(!adminProgramVenue)return;const used=new Set(sessionProgramsForVenue(adminProgramVenue).map(p=>p.session));const sid=SESSION_IDS.find(id=>!used.has(id));if(!sid){alert('この会場にはセッション①〜④がすべて登録されています。');return;}const d=sessionDef(sid);state.programs.push({id:'p'+Date.now(),reactionId:'',session:sid,start:d.start,end:d.end,grade:'',group:'',title:'',zoneId:adminProgramVenue,presenters:''});persist();renderAdminPrograms();renderPublic();toast(`${sessionLabel(sid)}の入力欄を追加しました`)});
+ byId('addAfternoonProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'afternoon',start:'13:00',end:'13:20',grade:'',group:'',title:'新しい午後プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('午後プログラムを追加しました')});
+ byId('addOtherProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'other',start:'08:30',end:'08:50',grade:'',group:'',title:'新しい全体プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('全体プログラムを追加しました')});
  byId('addDemoData')?.addEventListener('click',addDemoPrograms);
  byId('removeDemoData')?.addEventListener('click',removeDemoPrograms);
 }
-function renderBasic(){byId('settingYear').value=state.year;byId('settingDate').value=state.eventDate;byId('settingSlogan').value=state.slogan;byId('reactionDeadline').value=state.reactionDeadline||state.eventDate+'T17:00';
+function renderBasic(){byId('settingYear').value=state.year;byId('settingDate').value=state.eventDate;byId('settingSlogan').value=state.slogan;byId('reactionDeadline').value=state.reactionDeadline||state.eventDate+'T17:00';byId('internalPasscodeSetting').value=state.internalPasscode||'';
  byId('testEnabled').checked=!!state.test.enabled;byId('testDate').value=state.test.date;byId('testTime').value=state.test.time;byId('testSlider').value=timeNum(state.test.time);byId('testTimeText').textContent=state.test.time;}
 byId('saveBasic').onclick=()=>{const year=byId('settingYear').value.trim(),date=byId('settingDate').value;if(!year||!date)return alert('年度と開催日を入力してください');
  const oldDate=state.eventDate;const deadline=byId('reactionDeadline').value;if(!deadline)return alert('リアクションの受付終了日時を入力してください');
- state.year=year;state.eventDate=date;state.slogan=byId('settingSlogan').value.trim();state.reactionDeadline=oldDate!==date&&deadline.startsWith(oldDate+'T')?date+deadline.slice(10):deadline;byId('reactionDeadline').value=state.reactionDeadline;persist();renderPublic();toast('年度設定を保存しました');};
+ const internalPass=byId('internalPasscodeSetting').value.trim();if(internalPass && internalPass.length<8)return alert('大豊学園関係者用パスコードは8文字以上にしてください。');
+ state.year=year;state.eventDate=date;state.slogan=byId('settingSlogan').value.trim();state.internalPasscode=internalPass;state.reactionDeadline=oldDate!==date&&deadline.startsWith(oldDate+'T')?date+deadline.slice(10):deadline;byId('reactionDeadline').value=state.reactionDeadline;persist();renderPublic();toast('年度設定を保存しました');};
 function updateTest(){state.test.enabled=byId('testEnabled').checked;state.test.date=byId('testDate').value||state.eventDate;state.test.time=byId('testTime').value||'09:25';
  byId('testTimeText').textContent=state.test.time;byId('testSlider').value=timeNum(state.test.time);persist();renderPublic();}
 byId('testEnabled').onchange=updateTest;byId('testDate').onchange=updateTest;byId('testTime').oninput=updateTest;
@@ -968,12 +1066,12 @@ byId('printNotice').onclick=()=>{
  <h1>${esc(state.noticeTitle)}</h1><div class="message">${nl2brText(state.noticeMessage)}</div>
  <div class="main-grid"><div><h2>OFESアプリでできること</h2><ul class="features"><li><strong>プログラム：</strong>発表時間・発表内容・会場を確認できます。</li><li><strong>会場案内：</strong>学校全体図、前期棟、後期棟から会場を確認できます。</li><li><strong>スタンプラリー：</strong>校内5か所のQRコードを読み取って楽しめます。</li><li><strong>リアクション：</strong>発表への感想を5種類のボタンで届けられます。</li></ul><p><strong>今年度のスローガン：</strong>${esc(state.slogan)}</p></div><div class="qrbox"><strong>OFESはこちら</strong><br><img src="${qr}" alt="OFES QRコード"><div class="url">${esc(url)}</div><small>カメラでQRコードを読み取ってください。</small></div></div>
  <h2>スマートフォンのホーム画面に追加する方法</h2><div class="install"><div><strong>iPhone（Safari）</strong><ol><li>QRコードからOFESをSafariで開く</li><li>画面下の「共有」ボタン（□に↑）をタップ</li><li>「ホーム画面に追加」を選ぶ</li><li>「追加」をタップ</li></ol></div><div><strong>Android（Chrome）</strong><ol><li>QRコードからOFESをChromeで開く</li><li>右上の「︙」メニューをタップ</li><li>「ホーム画面に追加」または「アプリをインストール」を選ぶ</li><li>画面の案内に従って追加する</li></ol></div></div>
- <div class="note">※ OFESはWebアプリです。通常の閲覧にはログインは必要ありません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div><div class="issuer">${esc(state.noticeIssuer)}</div>
+ ${state.internalPasscode?`<div class="message"><strong>大豊学園関係者用パスコード：</strong> <span style="font-size:16pt;font-weight:800;letter-spacing:.08em">${esc(state.internalPasscode)}</span><br><small>児童生徒・保護者・学校関係者は、最初の画面で「大豊学園」を選び、このパスコードを入力してください。</small></div>`:''}<div class="note">※ OFESはWebアプリです。一般来場者は「一般来場者」から利用できます。児童生徒名は一般来場者には表示されません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div><div class="issuer">${esc(state.noticeIssuer)}</div>
  </body></html>`;
  w.document.open();w.document.write(html);w.document.close();
 };
 
-byId('exportJson').onclick=()=>{const blob=new Blob([JSON.stringify({version:15,data:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`OFES_${state.year}_backup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);};
+byId('exportJson').onclick=()=>{const blob=new Blob([JSON.stringify({version:16,data:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`OFES_${state.year}_backup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);};
 byId('importJson').onchange=async e=>{
  const f=e.target.files?.[0];if(!f)return;
  const status=byId('importJsonStatus');
@@ -1007,7 +1105,7 @@ byId('importJson').onchange=async e=>{
  }
 };
 byId('resetAll').onclick=()=>{if(!confirm('このブラウザに保存した会場・プログラムなどの下書きデータをすべて初期化しますか？'))return;state=clone(DEFAULT_DATA);draftState=state;persist();adminMap='campus';editId='';editDraft=null;adminProgramVenue='';renderAdmin();renderPublic();toast('初期化しました')};
-renderPublic();readStampFromUrl();
+audienceMode=sessionStorage.getItem(ACCESS_MODE_KEY)==='public'?'public':'';renderPublic();readStampFromUrl();if(!audienceMode)showEntryGate();else hideEntryGate();
 // 外部SDKが読み込めない場合も、接続タブで理由が分かるようにする。
 setTimeout(()=>{
  const node=byId('firebaseSdkStatus');
@@ -1018,4 +1116,4 @@ setTimeout(()=>{
  }
 },16000);
 window.addEventListener('resize',()=>{if($('#tab-venues').classList.contains('active'))sizeVisibleFloorMaps();});
-setInterval(()=>{if(!state.test.enabled){renderHeader();renderProgram();if($('#tab-venues').classList.contains('active'))renderVisitorMap();}},30000);
+setInterval(()=>{if(!state.test.enabled){renderHeader();renderProgram();if($('#tab-venues').classList.contains('active'))renderVisitorMap();renderTv();}},30000);
