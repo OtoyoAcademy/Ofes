@@ -21,6 +21,12 @@ const DEFAULT_SESSIONS={
  s3:{label:'セッション③',start:'10:20',end:'10:40'},
  s4:{label:'セッション④',start:'10:50',end:'11:10'}
 };
+const SAFETY_TYPES={
+ extinguisher:{label:'消火器',icon:'🧯'},
+ exit:{label:'非常口',icon:'EXIT'},
+ aed:{label:'AED',icon:'AED'},
+ assembly:{label:'避難集合場所',icon:'集合'}
+};
 const DEFAULT_DATA = {
  year:'2026', eventDate:'2026-11-21', slogan:'挑戦・協働・創造', reactionDeadline:'2026-11-21T17:00',
  noticeTitle:'おおフェス（OFES）Webアプリのご案内',
@@ -28,7 +34,7 @@ const DEFAULT_DATA = {
  noticeIssuer:'大豊学園',
  test:{enabled:false,date:'2026-11-21',time:'09:25'},
  sessions:JSON.parse(JSON.stringify(DEFAULT_SESSIONS)),
- zones:[],nextIds:{campus:1,zenki1:1,zenki2:1,koki1:1,koki2:1,koki3:1},
+ zones:[],safetyItems:[],nextSafetyId:1,nextIds:{campus:1,zenki1:1,zenki2:1,koki1:1,koki2:1,koki3:1},
  programs:[
   {id:'p1',session:'other',start:'08:45',end:'09:05',grade:'',group:'',title:'開会行事・アトラクション',zoneId:''},
   {id:'p6',session:'afternoon',start:'13:32',end:'13:38',grade:'',group:'',title:'午後のステージ発表（仮）',zoneId:''}
@@ -63,6 +69,13 @@ function validData(v){
  const out={...clone(DEFAULT_DATA), ...v};
  if(typeof v.reactionDeadline!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v.reactionDeadline))out.reactionDeadline=out.eventDate+'T17:00';
  out.zones=v.zones.filter(z=>z && typeof z.id==='string' && MAPS.some(m=>m.id===z.mapId)).map(z=>({id:z.id,mapId:z.mapId,name:String(z.name||'会場'),note:String(z.note||''),kind:String(z.kind||'classroom'),x:bound(z.x,0,100),y:bound(z.y,0,100),w:bound(z.w,.1,100),h:bound(z.h,.1,100)}));
+ const rawSafety=Array.isArray(v.safetyItems)?v.safetyItems:[];
+ out.safetyItems=rawSafety.filter(it=>it&&typeof it.id==='string'&&MAPS.some(m=>m.id===it.mapId)).map(it=>{
+  if(it.kind==='route')return {id:String(it.id),mapId:String(it.mapId),kind:'route',type:'route',label:String(it.label||'避難経路'),x1:bound(it.x1,0,100),y1:bound(it.y1,0,100),x2:bound(it.x2,0,100),y2:bound(it.y2,0,100)};
+  const type=SAFETY_TYPES[it.type]?String(it.type):'extinguisher';
+  return {id:String(it.id),mapId:String(it.mapId),kind:'point',type,label:String(it.label||SAFETY_TYPES[type].label),x:bound(it.x,0,100),y:bound(it.y,0,100)};
+ });
+ out.nextSafetyId=Math.max(1,Number(v.nextSafetyId)||1);
  // Ver.1.6: セッションの時刻は4つだけを先に設定し、各会場の発表はセッションを参照する。
  out.sessions=clone(DEFAULT_SESSIONS);
  for(const sid of SESSION_IDS){
@@ -100,12 +113,12 @@ let editorActive=false;
 let demoDraftPreview=false;
 let state=draftState;
 let cloudAvailable=false;
-const schemaVersion=6;
+const schemaVersion=7;
 function projectPublished(src){
  const safe=validData(src);
  // テスト日時はブラウザ専用。公開データには送らず、全来場者で実時刻を使う。
  return {schemaVersion,year:safe.year,eventDate:safe.eventDate,slogan:safe.slogan,sessions:clone(safe.sessions),
-   zones:clone(safe.zones),nextIds:clone(safe.nextIds),programs:clone(safe.programs),reactionDeadline:safe.reactionDeadline,
+   zones:clone(safe.zones),safetyItems:clone(safe.safetyItems),nextSafetyId:safe.nextSafetyId,nextIds:clone(safe.nextIds),programs:clone(safe.programs),reactionDeadline:safe.reactionDeadline,
    noticeTitle:safe.noticeTitle,noticeMessage:safe.noticeMessage,noticeIssuer:safe.noticeIssuer};
 }
 function acceptPublished(doc){
@@ -130,7 +143,7 @@ window.OFESCloud={
   publishedSummary:()=>({exists:cloudAvailable,year:publishedState?.year,zones:publishedState?.zones.length||0,programs:publishedState?.programs.length||0}),
   importPublishedAsDraft:()=>{
    if(!publishedState)throw Error('Supabaseにはまだ公開データがありません。');
-   draftState=clone(publishedState);state=draftState;persist();editId='';editDraft=null;drawMode='';adminMap='campus';
+   draftState=clone(publishedState);state=draftState;persist();editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
    renderAdmin();renderPublic();toast('Supabaseの公開データを編集用に読み込みました');
   }
 };
@@ -142,6 +155,7 @@ let programReturnScrollY=0;
 let reactionPreviewMode=false,reactionPreviewProgram=null;
 const visitorZoom=Object.fromEntries(MAPS.map(m=>[m.id,100]));
 let adminMap='campus',editId='',editDraft=null,drawMode='',dragStart=null,dragRect=null,adminProgramVenue='';
+let safetyVisible=true,selectedSafetyId='';
 function syncSessionProgramTimes(target=state){
  if(!target.sessions)target.sessions=clone(DEFAULT_SESSIONS);
  for(const p of target.programs||[]){const sd=target.sessions[p.session];if(sd){p.start=sd.start;p.end=sd.end;}}
@@ -149,6 +163,7 @@ function syncSessionProgramTimes(target=state){
 function persist(){try{syncSessionProgramTimes(state);syncReactionGroups(state);draftState=state;localStorage.setItem(STORAGE_KEY,JSON.stringify(state));return true}catch(e){alert('ブラウザに保存できませんでした。容量・設定をご確認ください。');return false}}
 function toast(msg){byId('saveToast').textContent=msg;}
 function getZone(id){return state.zones.find(z=>z.id===id)}
+function getSafety(id){return (state.safetyItems||[]).find(it=>it.id===id)}
 function getMap(id){return MAPS.find(m=>m.id===id)||MAPS[0]}
 function timeNum(t){const [h,m]=String(t).split(':').map(Number);return h*60+m}
 function sessionDef(id){return state.sessions?.[id]||DEFAULT_SESSIONS[id]||null}
@@ -285,6 +300,14 @@ byId('returnToProgram')?.addEventListener('click',()=>{
  setTab('program',{scrollTop:false});
  requestAnimationFrame(()=>window.scrollTo({top:programReturnScrollY||0,behavior:'smooth'}));
 });
+byId('toggleSafetyInfo')?.addEventListener('click',()=>{
+ safetyVisible=!safetyVisible;
+ byId('toggleSafetyInfo').classList.toggle('active',safetyVisible);
+ byId('toggleSafetyInfo').setAttribute('aria-pressed',String(safetyVisible));
+ byId('toggleSafetyInfo').textContent=safetyVisible?'安全情報を表示中':'安全情報を表示';
+ byId('safetyLegend').hidden=!safetyVisible;
+ renderVisitorMap();
+});
 function renderSessionButtons(){
  const shortMarks={s1:'①',s2:'②',s3:'③',s4:'④'};
  const entries=[{id:'current',label:'現在',aria:'現在の時間帯'},...SESSION_IDS.map((id)=>{const d=sessionDef(id);return {id,label:`${shortMarks[id]}${d.start}〜${d.end}`,aria:`${sessionLabel(id)} ${d.start}〜${d.end}`}})];
@@ -293,6 +316,22 @@ function renderSessionButtons(){
 }
 function zStyle(z){return `left:${bound(z.x,0,100)}%;top:${bound(z.y,0,100)}%;width:${bound(z.w,.1,100)}%;height:${bound(z.h,.1,100)}%;`}
 function zoneHtml(z,active,selected){const label=z.name||z.id;return `<button type="button" class="zone ${active?'on':''} ${selected?'selected':''}" style="${zStyle(z)}" data-zone="${esc(z.id)}" title="${esc(z.name)}" aria-label="${esc(z.name)}"><span class="zone-caption">${esc(label)}</span></button>`}
+function safetyPointHtml(it,admin=false){
+ const def=SAFETY_TYPES[it.type]||SAFETY_TYPES.extinguisher;
+ const selected=admin&&it.id===selectedSafetyId;
+ return `<button type="button" class="safety-marker safety-${esc(it.type)} ${selected?'selected':''}" style="left:${bound(it.x,0,100)}%;top:${bound(it.y,0,100)}%" data-safety="${esc(it.id)}" title="${esc(it.label||def.label)}" aria-label="${esc(it.label||def.label)}"><span>${esc(def.icon)}</span></button>`;
+}
+function safetyOverlayHtml(mapId,admin=false){
+ if(!admin&&!safetyVisible)return '';
+ const items=(state.safetyItems||[]).filter(it=>it.mapId===mapId);
+ const routes=items.filter(it=>it.kind==='route');
+ const points=items.filter(it=>it.kind!=='route');
+ const markerId=`safetyArrow-${admin?'admin':'visitor'}-${mapId}`;
+ const lines=routes.map(it=>`<line class="safety-route-line ${admin&&it.id===selectedSafetyId?'selected':''}" x1="${bound(it.x1,0,100)}" y1="${bound(it.y1,0,100)}" x2="${bound(it.x2,0,100)}" y2="${bound(it.y2,0,100)}" marker-end="url(#${esc(markerId)})" />`).join('');
+ const handles=admin?routes.map(it=>{const x=(Number(it.x1)+Number(it.x2))/2,y=(Number(it.y1)+Number(it.y2))/2;return `<button type="button" class="safety-route-handle ${it.id===selectedSafetyId?'selected':''}" style="left:${x}%;top:${y}%" data-safety="${esc(it.id)}" title="${esc(it.label||'避難経路')}" aria-label="${esc(it.label||'避難経路')}">→</button>`}).join(''):'';
+ return `<svg class="safety-route-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><defs><marker id="${esc(markerId)}" markerWidth="5" markerHeight="5" refX="4.2" refY="2.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L5,2.5 L0,5 z" /></marker></defs>${lines}</svg>${points.map(it=>safetyPointHtml(it,admin)).join('')}${handles}`;
+}
+
 function floorLabel(m){return m.floor?`${m.floor}階`:'学校全体図'}
 function floorDetailHtml(m){
  const z=getZone(visitorSelected);
@@ -376,6 +415,8 @@ function enableMapPinch(){
 }
 function renderVisitorMap(){
  renderBuildingTabs();renderSessionButtons();
+ if(byId('toggleSafetyInfo')){byId('toggleSafetyInfo').classList.toggle('active',safetyVisible);byId('toggleSafetyInfo').setAttribute('aria-pressed',String(safetyVisible));byId('toggleSafetyInfo').textContent=safetyVisible?'安全情報を表示中':'安全情報を表示';}
+ if(byId('safetyLegend'))byId('safetyLegend').hidden=!safetyVisible;
  const maps=visibleMaps();
  const programs=scheduledPrograms(),activeIds=new Set(programs.map(p=>p.zoneId).filter(Boolean));
  const count=state.zones.filter(z=>maps.some(m=>m.id===z.mapId)&&activeIds.has(z.id)).length;
@@ -389,6 +430,7 @@ function renderVisitorMap(){
    <div class="floor-map-window" id="window-${m.id}" data-map="${m.id}">
     <div class="map-stage" id="stage-${m.id}" style="width:${visitorZoom[m.id]}%">
      <img src="${esc(m.src)}" draggable="false" alt="${esc(m.name)}">
+     <div class="safety-layer">${safetyOverlayHtml(m.id,false)}</div>
      <div class="map-zone-layer">${zones.map(z=>zoneHtml(z,activeIds.has(z.id),z.id===visitorSelected)).join('')}</div>
     </div>
    </div>
@@ -495,19 +537,21 @@ byId('loginForm').onsubmit=e=>{e.preventDefault();if(byId('adminPassword').value
 byId('closeAdmin').onclick=()=>{byId('adminPanel').hidden=true;drawMode='';closeDraft()};
 $$('#adminNav button').forEach(b=>b.onclick=()=>{const t=b.dataset.admin;$$('#adminNav button').forEach(x=>x.classList.toggle('active',x===b));$$('.admin-page').forEach(x=>x.classList.toggle('active',x.id===`admin-${t}`));if(t==='venues')renderEditor();if(t==='program')renderAdminPrograms();if(t==='basic')renderBasic();if(t==='notice')renderNotice();if(t==='stampqr')renderStampQrAdmin();});
 function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');byId('adminMapSelect').value=adminMap;renderEditor();renderAdminPrograms();renderBasic();renderNotice();renderStampQrAdmin();}
-byId('adminMapSelect').onchange=e=>{adminMap=e.target.value;editId='';editDraft=null;drawMode='';renderEditor()};
+byId('adminMapSelect').onchange=e=>{adminMap=e.target.value;editId='';editDraft=null;selectedSafetyId='';drawMode='';renderEditor()};
 function renderEditor(){
  const m=getMap(adminMap);byId('adminMapSelect').value=adminMap;byId('adminMapImage').src=m.src;byId('adminMapImage').alt=m.name;
  const stage=byId('adminStage');stage.classList.toggle('drawing',Boolean(drawMode));
- byId('drawGuide').textContent=drawMode?`${drawMode==='new'?'新しい会場':'位置の再指定'}：図面上で教室の枠をドラッグして囲んでください。`:'登録済みの会場をタップすると、名前や位置を編集できます。';
+ byId('drawGuide').textContent=drawMode?(drawMode.includes('safety-point')?'安全設備：図面上の位置を1回タップしてください。':drawMode.includes('safety-route')?'避難経路：開始地点から終了地点までドラッグしてください。':`${drawMode==='new'?'新しい会場':'位置の再指定'}：図面上で教室の枠をドラッグして囲んでください。`):'登録済みの会場または安全情報をタップすると編集できます。';
  const zones=state.zones.filter(z=>z.mapId===adminMap);
  byId('adminZoneLayer').innerHTML=zones.map(z=>zoneHtml(z,false,z.id===editId)).join('')+(editDraft&&editDraft.mapId===adminMap&&!zones.some(z=>z.id===(editId||editDraft.id))?zoneHtml(editDraft,false,true):'');
+ byId('adminSafetyLayer').innerHTML=safetyOverlayHtml(adminMap,true);
  $$('#adminZoneLayer [data-zone]').forEach(el=>{el.onclick=()=>selectZone(el.dataset.zone);});
+ $$('#adminSafetyLayer [data-safety]').forEach(el=>{el.onclick=e=>{e.stopPropagation();selectSafety(el.dataset.safety);};});
  byId('mapZoneList').innerHTML=zones.length?zones.map(z=>`<button type="button" class="${z.id===editId?'current':''}" data-list-zone="${esc(z.id)}"><b>${esc(z.name)}</b><small>${esc(z.id)}</small></button>`).join(''):'<p class="muted">まだ登録はありません。</p>';
  $$('[data-list-zone]').forEach(b=>b.onclick=()=>selectZone(b.dataset.listZone));
- renderEditForm();
+ renderEditForm();renderSafetyAdmin();
 }
-function selectZone(id){const z=getZone(id);if(!z)return;drawMode='';editDraft=clone(z);editId=z.id;renderEditor()}
+function selectZone(id){const z=getZone(id);if(!z)return;drawMode='';selectedSafetyId='';editDraft=clone(z);editId=z.id;renderEditor()}
 function renderEditForm(){const v=editDraft;
  byId('venueForm').hidden=!v;byId('emptyVenueNote').hidden=!!v;
  if(!v)return;
@@ -521,18 +565,31 @@ function newId(mapId){
  do{id=map.prefix+'-'+String(next).padStart(2,'0');next++;}while(getZone(id));
  state.nextIds[mapId]=next;return id;
 }
-byId('newVenue').onclick=()=>{editId='';editDraft=null;drawMode='new';renderEditor()};
+byId('newVenue').onclick=()=>{selectedSafetyId='';editId='';editDraft=null;drawMode='new';renderEditor()};
 byId('redrawVenue').onclick=()=>{if(!editDraft){toast('先に会場を選んでください');return;}drawMode='redraw';renderEditor()};
-byId('cancelDrawing').onclick=()=>{drawMode='';editDraft=null;editId='';renderEditor()};
+byId('cancelDrawing').onclick=()=>{drawMode='';editDraft=null;editId='';selectedSafetyId='';renderEditor()};
 const drawLayer=byId('drawLayer');
 function pointOf(e){const box=byId('adminStage').getBoundingClientRect();return {x:bound((e.clientX-box.left)/box.width*100,0,100),y:bound((e.clientY-box.top)/box.height*100,0,100)}}
 function rectFrom(a,b){let x=Math.min(a.x,b.x),y=Math.min(a.y,b.y),w=Math.abs(a.x-b.x),h=Math.abs(a.y-b.y);return{x:+x.toFixed(2),y:+y.toFixed(2),w:+w.toFixed(2),h:+h.toFixed(2)}}
 function drawPreview(rect){drawLayer.innerHTML=`<div class="draw-preview" style="${zStyle(rect)}"></div>`}
-drawLayer.addEventListener('pointerdown',e=>{if(!drawMode)return;e.preventDefault();dragStart=pointOf(e);dragRect=null;drawLayer.setPointerCapture(e.pointerId);drawPreview({...dragStart,w:.1,h:.1});});
-drawLayer.addEventListener('pointermove',e=>{if(!dragStart)return;e.preventDefault();dragRect=rectFrom(dragStart,pointOf(e));drawPreview(dragRect);});
-function finishDraw(e){if(!dragStart)return;const r=rectFrom(dragStart,pointOf(e));dragStart=null;drawLayer.innerHTML='';if(r.w<.9||r.h<.9){toast('枠をもう少し大きくドラッグしてください');return}
- if(drawMode==='new'){editDraft={id:newId(adminMap),mapId:adminMap,name:'新しい会場',note:'',kind:'classroom',...r};editId='';}
- else if(drawMode==='redraw'&&editDraft){Object.assign(editDraft,r)}
+function drawRoutePreview(a,b){drawLayer.innerHTML=`<svg class="draw-route-preview" viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" /></svg>`}
+drawLayer.addEventListener('pointerdown',e=>{if(!drawMode)return;e.preventDefault();dragStart=pointOf(e);dragRect=null;drawLayer.setPointerCapture(e.pointerId);if(drawMode.includes('route'))drawRoutePreview(dragStart,dragStart);else if(!drawMode.includes('safety-point'))drawPreview({...dragStart,w:.1,h:.1});});
+drawLayer.addEventListener('pointermove',e=>{if(!dragStart)return;e.preventDefault();const p=pointOf(e);if(drawMode.includes('route'))drawRoutePreview(dragStart,p);else if(!drawMode.includes('safety-point')){dragRect=rectFrom(dragStart,p);drawPreview(dragRect);}});
+function finishDraw(e){if(!dragStart)return;const end=pointOf(e),mode=drawMode,start=dragStart;dragStart=null;drawLayer.innerHTML='';
+ if(mode==='safety-point-new'||mode==='safety-point-redraw'){
+  if(mode==='safety-point-new'){const type=byId('safetyAddType').value;const def=SAFETY_TYPES[type]||SAFETY_TYPES.extinguisher;const it={id:newSafetyId(),mapId:adminMap,kind:'point',type,label:def.label,x:+end.x.toFixed(2),y:+end.y.toFixed(2)};state.safetyItems.push(it);selectedSafetyId=it.id;}
+  else {const it=getSafety(selectedSafetyId);if(it){it.x=+end.x.toFixed(2);it.y=+end.y.toFixed(2);}}
+  drawMode='';persist();renderEditor();renderPublic();toast('安全設備の位置を保存しました');return;
+ }
+ if(mode==='safety-route-new'||mode==='safety-route-redraw'){
+  const dist=Math.hypot(end.x-start.x,end.y-start.y);if(dist<1){drawMode='';renderEditor();toast('避難経路は少し長めにドラッグしてください');return;}
+  if(mode==='safety-route-new'){const it={id:newSafetyId(),mapId:adminMap,kind:'route',type:'route',label:'避難経路',x1:+start.x.toFixed(2),y1:+start.y.toFixed(2),x2:+end.x.toFixed(2),y2:+end.y.toFixed(2)};state.safetyItems.push(it);selectedSafetyId=it.id;}
+  else {const it=getSafety(selectedSafetyId);if(it){Object.assign(it,{x1:+start.x.toFixed(2),y1:+start.y.toFixed(2),x2:+end.x.toFixed(2),y2:+end.y.toFixed(2)});}}
+  drawMode='';persist();renderEditor();renderPublic();toast('避難経路を保存しました');return;
+ }
+ const r=rectFrom(start,end);if(r.w<.9||r.h<.9){toast('枠をもう少し大きくドラッグしてください');return}
+ if(mode==='new'){editDraft={id:newId(adminMap),mapId:adminMap,name:'新しい会場',note:'',kind:'classroom',...r};editId='';}
+ else if(mode==='redraw'&&editDraft){Object.assign(editDraft,r)}
  drawMode='';renderEditor();toast('位置を指定しました。会場名を入力して保存してください。');}
 drawLayer.addEventListener('pointerup',finishDraw);
 drawLayer.addEventListener('pointercancel',()=>{dragStart=null;drawLayer.innerHTML=''});
@@ -575,6 +632,24 @@ byId('attachDemo').onclick=()=>{const r=readVenueForm();if(!r)return alert('先�
  requestAnimationFrame(()=>{const detail=byId(`floor-detail-${r.mapId}`);if(detail&&!detail.hidden)detail.scrollIntoView({behavior:'smooth',block:'center'});});
  toast(`${sessionLabel(sid)}のリアクション表示テストを開始しました`);
 };
+
+function newSafetyId(){let n=Math.max(1,Number(state.nextSafetyId)||1),id='';do{id=`SAFE-${String(n).padStart(2,'0')}`;n++;}while(getSafety(id));state.nextSafetyId=n;return id;}
+function selectSafety(id){const it=getSafety(id);if(!it)return;drawMode='';editId='';editDraft=null;selectedSafetyId=id;renderEditor();}
+function safetyKindLabel(it){return it.kind==='route'?'避難経路':(SAFETY_TYPES[it.type]?.label||'安全設備');}
+function renderSafetyAdmin(){
+ const items=(state.safetyItems||[]).filter(it=>it.mapId===adminMap);
+ const selected=getSafety(selectedSafetyId);
+ byId('safetyItemList').innerHTML=items.length?items.map(it=>`<button type="button" class="${it.id===selectedSafetyId?'current':''}" data-safety-list="${esc(it.id)}"><b>${esc(it.label||safetyKindLabel(it))}</b><small>${esc(safetyKindLabel(it))}｜${esc(it.id)}</small></button>`).join(''):'<p class="muted">この図には安全情報がまだ登録されていません。</p>';
+ $$('[data-safety-list]').forEach(b=>b.onclick=()=>selectSafety(b.dataset.safetyList));
+ const area=byId('safetyEditArea');if(!selected||selected.mapId!==adminMap){area.innerHTML='<p class="muted">追加後、地図上の安全マークや一覧を選ぶと編集できます。</p>';return;}
+ if(selected.kind==='route')area.innerHTML=`<div class="safety-edit-box"><label>表示名<input id="safetyLabel" maxlength="60" value="${esc(selected.label||'避難経路')}"></label><div class="four-cols"><label>開始X %<input id="safetyX1" type="number" min="0" max="100" step="0.1" value="${Number(selected.x1).toFixed(1)}"></label><label>開始Y %<input id="safetyY1" type="number" min="0" max="100" step="0.1" value="${Number(selected.y1).toFixed(1)}"></label><label>終了X %<input id="safetyX2" type="number" min="0" max="100" step="0.1" value="${Number(selected.x2).toFixed(1)}"></label><label>終了Y %<input id="safetyY2" type="number" min="0" max="100" step="0.1" value="${Number(selected.y2).toFixed(1)}"></label></div><div class="row-actions"><button type="button" class="btn primary" id="saveSafety">保存</button><button type="button" class="btn light" id="redrawSafety">経路を描き直す</button><button type="button" class="btn danger" id="deleteSafety">削除</button></div></div>`;
+ else area.innerHTML=`<div class="safety-edit-box"><label>種類<select id="safetyTypeEdit">${Object.entries(SAFETY_TYPES).map(([k,d])=>`<option value="${k}" ${selected.type===k?'selected':''}>${esc(d.label)}</option>`).join('')}</select></label><label>表示名<input id="safetyLabel" maxlength="60" value="${esc(selected.label||safetyKindLabel(selected))}"></label><div class="four-cols"><label>左位置 %<input id="safetyX" type="number" min="0" max="100" step="0.1" value="${Number(selected.x).toFixed(1)}"></label><label>上位置 %<input id="safetyY" type="number" min="0" max="100" step="0.1" value="${Number(selected.y).toFixed(1)}"></label></div><div class="row-actions"><button type="button" class="btn primary" id="saveSafety">保存</button><button type="button" class="btn light" id="redrawSafety">位置を指定し直す</button><button type="button" class="btn danger" id="deleteSafety">削除</button></div></div>`;
+ byId('saveSafety').onclick=()=>{const it=getSafety(selectedSafetyId);if(!it)return;it.label=byId('safetyLabel').value.trim()||safetyKindLabel(it);if(it.kind==='route'){it.x1=bound(byId('safetyX1').value,0,100);it.y1=bound(byId('safetyY1').value,0,100);it.x2=bound(byId('safetyX2').value,0,100);it.y2=bound(byId('safetyY2').value,0,100);}else{it.type=byId('safetyTypeEdit').value;it.x=bound(byId('safetyX').value,0,100);it.y=bound(byId('safetyY').value,0,100);}persist();renderEditor();renderPublic();toast('安全情報を保存しました');};
+ byId('redrawSafety').onclick=()=>{const it=getSafety(selectedSafetyId);if(!it)return;drawMode=it.kind==='route'?'safety-route-redraw':'safety-point-redraw';renderEditor();toast(it.kind==='route'?'地図上で避難経路をドラッグしてください':'地図上で新しい位置をタップしてください');};
+ byId('deleteSafety').onclick=()=>{const it=getSafety(selectedSafetyId);if(!it||!confirm(`「${it.label||safetyKindLabel(it)}」を削除しますか？`))return;state.safetyItems=state.safetyItems.filter(x=>x.id!==it.id);selectedSafetyId='';persist();renderEditor();renderPublic();toast('安全情報を削除しました');};
+}
+byId('addSafetyPoint').onclick=()=>{editId='';editDraft=null;selectedSafetyId='';drawMode='safety-point-new';renderEditor();toast('地図上で安全設備の位置をタップしてください');};
+byId('addSafetyRoute').onclick=()=>{editId='';editDraft=null;selectedSafetyId='';drawMode='safety-route-new';renderEditor();toast('地図上で避難経路の開始地点から終了地点までドラッグしてください');};
 
 function roomOptions(sel){return `<option value="">（会場未登録）</option>`+state.zones.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(z=>`<option value="${esc(z.id)}" ${z.id===sel?'selected':''}>${esc(z.id)}｜${esc(z.name)}</option>`).join('')}
 function sessionOptions(sel){return SESSION_IDS.map(id=>`<option value="${id}" ${id===sel?'selected':''}>${esc(sessionLabel(id))}（${esc(sessionDef(id).start)}〜${esc(sessionDef(id).end)}）</option>`).join('')}
