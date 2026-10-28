@@ -30,6 +30,7 @@ const SAFETY_TYPES={
 };
 const DEFAULT_DATA = {
  year:'2026', eventDate:'2026-11-21', slogan:'挑戦・協働・創造', reactionDeadline:'2026-11-21T17:00',
+ campusCanvasVersion:2,
  noticeTitle:'おおフェス（OFES）Webアプリのご案内',
  noticeMessage:'今年度のおおフェスでは、プログラムや会場案内などをスマートフォンで確認できるWebアプリ「OFES」をご利用いただけます。会場での移動や発表見学に、ぜひご活用ください。',
  noticeIssuer:'大豊学園',
@@ -66,17 +67,32 @@ function syncReactionGroups(target){
  }
  for(const p of programs){if(!(SESSION_IDS.includes(p.session)||p.session==='afternoon')&&!p.reactionId)p.reactionId=p.id;}
 }
+const CAMPUS_CANVAS_SCALE=0.849825378346915;
+const CAMPUS_CANVAS_OFFSET=7.508731082654249;
+function campusYFromLegacy(y){return CAMPUS_CANVAS_OFFSET+bound(y,0,100)*CAMPUS_CANVAS_SCALE;}
+function campusHFromLegacy(h){return bound(h,.1,100)*CAMPUS_CANVAS_SCALE;}
 function validData(v){
  if(!v || typeof v!=='object'||!Array.isArray(v.zones)||!Array.isArray(v.programs))throw Error('データ形式が不正です');
  const out={...clone(DEFAULT_DATA), ...v};
+ const migrateCampusCanvas=Number(v.campusCanvasVersion||1)<2;
  if(typeof v.reactionDeadline!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v.reactionDeadline))out.reactionDeadline=out.eventDate+'T17:00';
- out.zones=v.zones.filter(z=>z && typeof z.id==='string' && MAPS.some(m=>m.id===z.mapId)).map(z=>({id:z.id,mapId:z.mapId,name:String(z.name||'会場'),note:String(z.note||''),kind:String(z.kind||'classroom'),x:bound(z.x,0,100),y:bound(z.y,0,100),w:bound(z.w,.1,100),h:bound(z.h,.1,100)}));
+ out.zones=v.zones.filter(z=>z && typeof z.id==='string' && MAPS.some(m=>m.id===z.mapId)).map(z=>{
+  let y=bound(z.y,0,100),h=bound(z.h,.1,100);
+  if(migrateCampusCanvas&&z.mapId==='campus'){y=campusYFromLegacy(y);h=campusHFromLegacy(h);}
+  return {id:z.id,mapId:z.mapId,name:String(z.name||'会場'),note:String(z.note||''),kind:String(z.kind||'classroom'),x:bound(z.x,0,100),y,w:bound(z.w,.1,100),h};
+ });
  const rawSafety=Array.isArray(v.safetyItems)?v.safetyItems:[];
  out.safetyItems=rawSafety.filter(it=>it&&typeof it.id==='string'&&MAPS.some(m=>m.id===it.mapId)).map(it=>{
-  if(it.kind==='route')return {id:String(it.id),mapId:String(it.mapId),kind:'route',type:'route',label:String(it.label||'避難経路'),x1:bound(it.x1,0,100),y1:bound(it.y1,0,100),x2:bound(it.x2,0,100),y2:bound(it.y2,0,100)};
+  if(it.kind==='route'){
+   let y1=bound(it.y1,0,100),y2=bound(it.y2,0,100);
+   if(migrateCampusCanvas&&it.mapId==='campus'){y1=campusYFromLegacy(y1);y2=campusYFromLegacy(y2);}
+   return {id:String(it.id),mapId:String(it.mapId),kind:'route',type:'route',label:String(it.label||'避難経路'),x1:bound(it.x1,0,100),y1,x2:bound(it.x2,0,100),y2};
+  }
   const type=SAFETY_TYPES[it.type]?String(it.type):'extinguisher';
-  return {id:String(it.id),mapId:String(it.mapId),kind:'point',type,label:String(it.label||SAFETY_TYPES[type].label),x:bound(it.x,0,100),y:bound(it.y,0,100)};
+  let y=bound(it.y,0,100);if(migrateCampusCanvas&&it.mapId==='campus')y=campusYFromLegacy(y);
+  return {id:String(it.id),mapId:String(it.mapId),kind:'point',type,label:String(it.label||SAFETY_TYPES[type].label),x:bound(it.x,0,100),y};
  });
+ out.campusCanvasVersion=2;
  out.nextSafetyId=Math.max(1,Number(v.nextSafetyId)||1);
  // Ver.1.6: セッションの時刻は4つだけを先に設定し、各会場の発表はセッションを参照する。
  out.sessions=clone(DEFAULT_SESSIONS);
@@ -117,12 +133,12 @@ let editorActive=false;
 let demoDraftPreview=false;
 let state=draftState;
 let cloudAvailable=false;
-const schemaVersion=7;
+const schemaVersion=8;
 function projectPublished(src){
  const safe=validData(src);
  // テスト日時はブラウザ専用。公開データには送らず、全来場者で実時刻を使う。
  const publicPrograms=safe.programs.map(({presenters,...p})=>p);
- return {schemaVersion,year:safe.year,eventDate:safe.eventDate,slogan:safe.slogan,sessions:clone(safe.sessions),
+ return {schemaVersion,campusCanvasVersion:safe.campusCanvasVersion,year:safe.year,eventDate:safe.eventDate,slogan:safe.slogan,sessions:clone(safe.sessions),
    zones:clone(safe.zones),safetyItems:clone(safe.safetyItems),nextSafetyId:safe.nextSafetyId,nextIds:clone(safe.nextIds),programs:publicPrograms,reactionDeadline:safe.reactionDeadline,
    noticeTitle:safe.noticeTitle,noticeMessage:safe.noticeMessage,noticeIssuer:safe.noticeIssuer,stampCompleteImage:safe.stampCompleteImage};
 }
@@ -191,7 +207,7 @@ let programReturnScrollY=0;
 let reactionPreviewMode=false,reactionPreviewProgram=null;
 const visitorZoom=Object.fromEntries(MAPS.map(m=>[m.id,100]));
 let adminMap='campus',editId='',editDraft=null,drawMode='',dragStart=null,dragRect=null,adminProgramVenue='';
-let safetyVisible=true,selectedSafetyId='';
+let safetyVisible=false,selectedSafetyId='';
 function syncSessionProgramTimes(target=state){
  if(!target.sessions)target.sessions=clone(DEFAULT_SESSIONS);
  for(const p of target.programs||[]){const sd=target.sessions[p.session];if(sd){p.start=sd.start;p.end=sd.end;}}
@@ -303,6 +319,12 @@ byId('returnToProgram')?.addEventListener('click',()=>{
  setTab('program',{scrollTop:false});
  requestAnimationFrame(()=>window.scrollTo({top:programReturnScrollY||0,behavior:'smooth'}));
 });
+function bindReactionHelpToggle(buttonId,panelId){
+ const button=byId(buttonId),panel=byId(panelId);if(!button||!panel)return;
+ button.addEventListener('click',()=>{const open=panel.hidden;panel.hidden=!open;button.classList.toggle('active',open);button.setAttribute('aria-expanded',String(open));button.textContent=open?'リアクションの説明を閉じる':'リアクションの説明を表示';});
+}
+bindReactionHelpToggle('toggleReactionGuideProgram','reactionGuideProgram');
+bindReactionHelpToggle('toggleReactionGuideVenue','reactionGuideVenue');
 byId('toggleSafetyInfo')?.addEventListener('click',()=>{
  safetyVisible=!safetyVisible;
  byId('toggleSafetyInfo').classList.toggle('active',safetyVisible);
@@ -431,7 +453,7 @@ function renderVisitorMap(){
    <div class="floor-card-header"><div><h3>${esc(floorLabel(m))}</h3><span class="floor-subtitle">${esc(m.name)}</span></div><span class="floor-count">${floorCount}か所 使用</span></div>
    <div class="floor-tools"><span>図を拡大して会場をタップ</span><div class="floor-zoom"><button type="button" data-zoom-map="${m.id}" data-zoom-action="out" aria-label="${esc(m.name)}を縮小">−</button><span id="zoom-${m.id}">${visitorZoom[m.id]}%</span><button type="button" data-zoom-map="${m.id}" data-zoom-action="in" aria-label="${esc(m.name)}を拡大">＋</button><button type="button" class="zoom-reset" data-zoom-map="${m.id}" data-zoom-action="reset">戻す</button></div></div>
    <div class="floor-map-window" id="window-${m.id}" data-map="${m.id}">
-    <div class="map-stage" id="stage-${m.id}" style="width:${visitorZoom[m.id]}%">
+    <div class="map-stage ${m.id==='campus'?'campus-canvas':''}" id="stage-${m.id}" style="width:${visitorZoom[m.id]}%">
      <img src="${esc(m.src)}" draggable="false" alt="${esc(m.name)}">
      <div class="safety-layer">${safetyOverlayHtml(m.id,false)}</div>
      <div class="map-zone-layer">${zones.map(z=>zoneHtml(z,activeIds.has(z.id),z.id===visitorSelected)).join('')}</div>
@@ -715,7 +737,7 @@ function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option val
 byId('adminMapSelect').onchange=e=>{adminMap=e.target.value;editId='';editDraft=null;selectedSafetyId='';drawMode='';renderEditor()};
 function renderEditor(){
  const m=getMap(adminMap);byId('adminMapSelect').value=adminMap;byId('adminMapImage').src=m.src;byId('adminMapImage').alt=m.name;
- const stage=byId('adminStage');stage.classList.toggle('drawing',Boolean(drawMode));
+ const stage=byId('adminStage');stage.classList.toggle('drawing',Boolean(drawMode));stage.classList.toggle('campus-canvas',adminMap==='campus');
  byId('drawGuide').textContent=drawMode?(drawMode.includes('safety-point')?'安全設備：図面上の位置を1回タップしてください。':drawMode.includes('safety-route')?'避難経路：開始地点から終了地点までドラッグしてください。':`${drawMode==='new'?'新しい会場':'位置の再指定'}：図面上で教室の枠をドラッグして囲んでください。`):'登録済みの会場または安全情報をタップすると編集できます。';
  const zones=state.zones.filter(z=>z.mapId===adminMap);
  byId('adminZoneLayer').innerHTML=zones.map(z=>zoneHtml(z,false,z.id===editId)).join('')+(editDraft&&editDraft.mapId===adminMap&&!zones.some(z=>z.id===(editId||editDraft.id))?zoneHtml(editDraft,false,true):'');

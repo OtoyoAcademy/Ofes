@@ -11,11 +11,11 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="OFES">
-  <link rel="stylesheet" href="style.css?v=127">
+  <link rel="stylesheet" href="style.css?v=128">
   <script defer src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-  <script defer src="app.js?v=127"></script>
+  <script defer src="app.js?v=128"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script type="module" src="supabase-bridge.js?v=127"></script>
+  <script type="module" src="supabase-bridge.js?v=128"></script>
 </head>
 <body>
 <div id="entryGate" class="entry-gate" hidden>
@@ -52,7 +52,8 @@
   <section class="tab-view active" id="tab-program">
     <div class="section-heading"><h2>プログラム</h2><p>当日のプログラムを時間順に確認できます。</p></div>
     <div id="timeStatus" class="notice-card"></div>
-    <div class="reaction-guide" aria-label="リアクションの意味">
+    <div class="reaction-help-controls"><button type="button" id="toggleReactionGuideProgram" class="reaction-help-toggle" aria-expanded="false">リアクションの説明を表示</button></div>
+    <div id="reactionGuideProgram" class="reaction-guide" aria-label="リアクションの意味" hidden>
       <strong>リアクションの意味</strong>
       <div class="reaction-guide-items">
         <span><b aria-hidden="true">👍</b> よかった</span><span><b aria-hidden="true">💡</b> なるほど</span><span><b aria-hidden="true">✨</b> すごい</span><span><b aria-hidden="true">😊</b> 楽しかった</span><span><b aria-hidden="true">🙌</b> 応援したい</span>
@@ -74,17 +75,18 @@
     <div class="session-label">表示する時間帯（セッション）</div>
     <div class="session-switch" id="sessionSwitch" aria-label="時間帯を選択"></div>
     <div id="mapSummary" class="info-strip" aria-live="polite"></div>
-    <div class="reaction-guide compact" aria-label="リアクションの意味">
+    <div class="map-help-toggles">
+      <button type="button" id="toggleReactionGuideVenue" class="reaction-help-toggle" aria-expanded="false">リアクションの説明を表示</button>
+      <button type="button" id="toggleSafetyInfo" class="safety-toggle" aria-pressed="false">安全情報を表示</button>
+    </div>
+    <div id="reactionGuideVenue" class="reaction-guide compact" aria-label="リアクションの意味" hidden>
       <strong>発表へのリアクション</strong>
       <div class="reaction-guide-items">
         <span><b aria-hidden="true">👍</b> よかった</span><span><b aria-hidden="true">💡</b> なるほど</span><span><b aria-hidden="true">✨</b> すごい</span><span><b aria-hidden="true">😊</b> 楽しかった</span><span><b aria-hidden="true">🙌</b> 応援したい</span>
       </div>
       <small>会場をタップすると、その場所で行われる発表を時間順に確認できます。</small>
     </div>
-    <div class="safety-public-controls">
-      <button type="button" id="toggleSafetyInfo" class="safety-toggle active" aria-pressed="true">安全情報を表示中</button>
-      <div id="safetyLegend" class="safety-legend" aria-label="安全情報の凡例"><span><b class="safety-symbol extinguisher">🧯</b>消火器</span><span><b class="safety-symbol exit">EXIT</b>非常口</span><span><b class="safety-symbol aed">AED</b>AED</span><span><b class="safety-symbol assembly">集合</b>避難集合場所</span><span><i class="safety-route-sample"></i>避難経路</span></div>
-    </div>
+    <div id="safetyLegend" class="safety-legend safety-legend-panel" aria-label="安全情報の凡例" hidden><span><b class="safety-symbol extinguisher">🧯</b>消火器</span><span><b class="safety-symbol exit">EXIT</b>非常口</span><span><b class="safety-symbol aed">AED</b>AED</span><span><b class="safety-symbol assembly">集合</b>避難集合場所</span><span><i class="safety-route-sample"></i>避難経路</span></div>
     <p class="map-usage">図面は<strong>＋・−</strong>または2本指で拡大・縮小できます。会場をタップすると、発表予定が表示されます。</p>
     <div id="visitorMaps" class="floor-stack" aria-label="校舎のフロア図"></div>
     <div class="legend"><span><i class="now"></i>選択中の時間帯で使用</span><span><i class="neutral"></i>登録済み会場</span></div>
@@ -124,10 +126,10 @@
   </div>
 </div>
 
-<div id="loginModal" class="modal" hidden><div class="modal-inner"><h2>管理画面を開く</h2><p class="muted">このパスワードは管理画面を開くための簡易ロックです。Supabaseの書き込み権限は、別途Supabase Authで管理します。</p><form id="loginForm"><label>管理者パスワード<input type="password" id="adminPassword" required autocomplete="current-password"></label><p id="loginError" class="error"></p><div class="modal-actions"><button type="button" class="btn light" id="cancelLogin">キャンセル</button><button type="submit" class="btn primary">ログイン</button></div></form></div></div>
+<div id="loginModal" class="modal admin-login-modal" hidden><div class="modal-inner"><h2>管理画面を開く</h2><p class="muted">このパスワードは管理画面を開くための簡易ロックです。Supabaseの書き込み権限は、別途Supabase Authで管理します。</p><form id="loginForm"><label>管理者パスワード<input type="password" id="adminPassword" required autocomplete="current-password"></label><p id="loginError" class="error"></p><div class="modal-actions"><button type="button" class="btn light" id="cancelLogin">キャンセル</button><button type="submit" class="btn primary">ログイン</button></div></form></div></div>
 
 <section id="adminPanel" class="admin-panel" hidden>
-  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.27 · TV表示／関係者表示／年度保存</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
+  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.28 · 会場案内表示調整／TVメニュー修正</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
   <nav class="admin-tabs" id="adminNav" aria-label="管理項目"><button data-admin="firebase" class="active">🔑 Supabase接続</button><button data-admin="venues">会場・配置図</button><button data-admin="program">プログラム</button><button data-admin="reactions">リアクション集計</button><button data-admin="basic">年度・時刻テスト</button><button data-admin="notice">お知らせPDF</button><button data-admin="stampqr">スタンプQR</button><button data-admin="years">年度データ</button><button data-admin="data">データ保存</button></nav>
 
   <div class="admin-page active" id="admin-firebase">
@@ -166,7 +168,7 @@
 </div>
 
   <div class="admin-page" id="admin-venues">
-    <div class="admin-intro"><b>使い方</b>　①図面を選ぶ → ②会場または安全情報を登録 → ③地図上で位置を指定 → ④内容を保存します。会場・消火器・非常口・AED・避難集合場所・避難経路を同じ画面で管理できます。<p class="caption"><strong>重要：</strong>編集内容は一度このブラウザの「下書き」に保存されます。来場者へ反映するには「データ保存」タブの「Supabaseへ公開」を押してください。JSONバックアップも残せます。</p></div>
+    <div class="admin-intro"><b>使い方</b>　①図面を選ぶ → ②会場または安全情報を登録 → ③地図上で位置を指定 → ④内容を保存します。会場・消火器・非常口・AED・避難集合場所・避難経路を同じ画面で管理できます。<p class="caption"><strong>学校全体図：</strong>図の上側・下側にも登録用の余白があります。校外の駐車場や臨時案内場所なども、通常の会場と同じ方法で登録できます。</p><p class="caption"><strong>重要：</strong>編集内容は一度このブラウザの「下書き」に保存されます。来場者へ反映するには「データ保存」タブの「Supabaseへ公開」を押してください。JSONバックアップも残せます。</p></div>
     <div class="admin-venue-layout">
       <div class="admin-canvas-col">
         <div class="admin-canvas-tools"><label>配置図を選択<select id="adminMapSelect"></select></label><div class="tool-buttons"><button id="newVenue" class="btn primary">＋ 新規会場</button><button id="redrawVenue" class="btn light">位置を指定し直す</button><button id="cancelDrawing" class="btn light">選択解除</button></div></div>

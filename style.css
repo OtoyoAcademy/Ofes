@@ -174,3 +174,23 @@
 .stamp-complete-panel{margin-top:20px;border:2px solid #e0b847;background:#fff9e8;border-radius:20px;padding:18px;text-align:center;overflow:hidden}.stamp-complete-panel img{display:block;max-width:min(680px,100%);max-height:70vh;object-fit:contain;margin:0 auto 14px;border-radius:14px}.stamp-complete-text{display:grid;gap:4px}.stamp-complete-text strong{font-size:28px;color:#9c6b00}.stamp-complete-text span{font-size:15px}.stamp-complete-admin-preview{margin-top:12px;display:grid;place-items:center;border:1px dashed #bbc9bd;border-radius:12px;min-height:110px;padding:12px}.stamp-complete-admin-preview img{max-width:100%;max-height:300px;border-radius:10px}.stamp-complete-admin-preview span{font-size:12px;color:#5a665e;margin-top:6px}
 .year-archive-list{display:grid;gap:10px}.year-archive-item{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px;border:1px solid #d2ddd5;border-radius:12px;background:#fbfcfa}.year-archive-item>div:first-child{display:grid;gap:3px}.year-archive-item strong{font-size:18px;color:#1b6847}.year-archive-item small{color:#66726a}@media(max-width:700px){.year-archive-item{align-items:flex-start;flex-direction:column}}
 .year-archive-preview{margin-top:14px;border:1px solid #cbd7cd;border-radius:14px;padding:14px;background:#f7faf7}.year-preview-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.year-preview-head>div{display:grid;gap:3px}.year-preview-head strong{font-size:22px;color:#1f754f}.year-preview-programs{display:grid;gap:6px;max-height:430px;overflow:auto}.year-preview-programs article{display:grid;grid-template-columns:110px 1fr;gap:10px;padding:9px 10px;background:#fff;border-radius:9px;border:1px solid #e0e7e1}.year-preview-programs time{font-weight:800;color:#1f754f}.year-preview-programs article>div{display:grid;gap:2px}.year-preview-programs span,.year-preview-programs small{color:#5b675f}
+
+
+/* Ver.1.28: campus margin, compact help toggles, desktop TV nav, opaque admin login */
+@media(min-width:701px){
+  .main-nav{grid-template-columns:repeat(4,minmax(0,1fr));}
+}
+.tv-nav{margin-left:0;width:100%;}
+@media(max-width:700px){
+  .main-nav{grid-template-columns:repeat(3,minmax(0,1fr));}
+  .tv-nav{grid-column:2;margin-left:0;width:100%;}
+}
+.reaction-help-controls,.map-help-toggles{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 6px;}
+.reaction-help-toggle{border:1px solid #aabbb0;border-radius:999px;background:#fff;padding:8px 12px;font-weight:800;color:#315944;}
+.reaction-help-toggle.active{background:#eaf6ee;border-color:#5e9d75;color:#174d2d;}
+.safety-legend-panel{margin:7px 0 9px;padding:8px 10px;background:#f7faf7;border:1px solid var(--line);border-radius:10px;}
+.reaction-guide[hidden],.safety-legend[hidden]{display:none!important;}
+.campus-canvas{padding-block:15%;background:#fff;}
+.campus-canvas>img{display:block;width:100%;height:auto;}
+.admin-login-modal{z-index:3200;background:var(--bg);}
+.admin-login-modal .modal-inner{box-shadow:0 20px 70px #20392a22;border:1px solid var(--line);}
