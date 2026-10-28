@@ -30,7 +30,7 @@ const SAFETY_TYPES={
 };
 const DEFAULT_DATA = {
  year:'2026', eventDate:'2026-11-21', slogan:'挑戦・協働・創造', reactionDeadline:'2026-11-21T17:00',
- campusCanvasVersion:2,
+ campusCanvasVersion:3,
  noticeTitle:'おおフェス（OFES）Webアプリのご案内',
  noticeMessage:'今年度のおおフェスでは、プログラムや会場案内などをスマートフォンで確認できるWebアプリ「OFES」をご利用いただけます。会場での移動や発表見学に、ぜひご活用ください。',
  noticeIssuer:'大豊学園',
@@ -69,16 +69,34 @@ function syncReactionGroups(target){
 }
 const CAMPUS_CANVAS_SCALE=0.849825378346915;
 const CAMPUS_CANVAS_OFFSET=7.508731082654249;
+// Ver.1.29: 学校全体図の上下余白を15%→22%へ拡張。
+// 既存の会場・安全情報は、図面本体に対する位置を保ったまま自動移行する。
+const CAMPUS_ASPECT_H=1022/602;
+const CAMPUS_OLD_PAD=0.15;
+const CAMPUS_NEW_PAD=0.22;
 function campusYFromLegacy(y){return CAMPUS_CANVAS_OFFSET+bound(y,0,100)*CAMPUS_CANVAS_SCALE;}
 function campusHFromLegacy(h){return bound(h,.1,100)*CAMPUS_CANVAS_SCALE;}
+function campusYV2toV3(y){
+ const oldTotal=CAMPUS_ASPECT_H+2*CAMPUS_OLD_PAD,newTotal=CAMPUS_ASPECT_H+2*CAMPUS_NEW_PAD;
+ const abs=bound(y,0,100)/100*oldTotal;
+ const rel=(abs-CAMPUS_OLD_PAD)/CAMPUS_ASPECT_H;
+ return bound((CAMPUS_NEW_PAD+rel*CAMPUS_ASPECT_H)/newTotal*100,0,100);
+}
+function campusHV2toV3(h){
+ const oldTotal=CAMPUS_ASPECT_H+2*CAMPUS_OLD_PAD,newTotal=CAMPUS_ASPECT_H+2*CAMPUS_NEW_PAD;
+ return bound(Number(h)||0.1,.1,100)*oldTotal/newTotal;
+}
 function validData(v){
  if(!v || typeof v!=='object'||!Array.isArray(v.zones)||!Array.isArray(v.programs))throw Error('データ形式が不正です');
  const out={...clone(DEFAULT_DATA), ...v};
- const migrateCampusCanvas=Number(v.campusCanvasVersion||1)<2;
+ const canvasVer=Number(v.campusCanvasVersion||1);
+ const migrateCampusCanvas=canvasVer<2;
+ const migrateCampusV3=canvasVer<3;
  if(typeof v.reactionDeadline!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v.reactionDeadline))out.reactionDeadline=out.eventDate+'T17:00';
  out.zones=v.zones.filter(z=>z && typeof z.id==='string' && MAPS.some(m=>m.id===z.mapId)).map(z=>{
   let y=bound(z.y,0,100),h=bound(z.h,.1,100);
   if(migrateCampusCanvas&&z.mapId==='campus'){y=campusYFromLegacy(y);h=campusHFromLegacy(h);}
+  if(migrateCampusV3&&z.mapId==='campus'){y=campusYV2toV3(y);h=campusHV2toV3(h);}
   return {id:z.id,mapId:z.mapId,name:String(z.name||'会場'),note:String(z.note||''),kind:String(z.kind||'classroom'),x:bound(z.x,0,100),y,w:bound(z.w,.1,100),h};
  });
  const rawSafety=Array.isArray(v.safetyItems)?v.safetyItems:[];
@@ -86,13 +104,14 @@ function validData(v){
   if(it.kind==='route'){
    let y1=bound(it.y1,0,100),y2=bound(it.y2,0,100);
    if(migrateCampusCanvas&&it.mapId==='campus'){y1=campusYFromLegacy(y1);y2=campusYFromLegacy(y2);}
+   if(migrateCampusV3&&it.mapId==='campus'){y1=campusYV2toV3(y1);y2=campusYV2toV3(y2);}
    return {id:String(it.id),mapId:String(it.mapId),kind:'route',type:'route',label:String(it.label||'避難経路'),x1:bound(it.x1,0,100),y1,x2:bound(it.x2,0,100),y2};
   }
   const type=SAFETY_TYPES[it.type]?String(it.type):'extinguisher';
-  let y=bound(it.y,0,100);if(migrateCampusCanvas&&it.mapId==='campus')y=campusYFromLegacy(y);
+  let y=bound(it.y,0,100);if(migrateCampusCanvas&&it.mapId==='campus')y=campusYFromLegacy(y);if(migrateCampusV3&&it.mapId==='campus')y=campusYV2toV3(y);
   return {id:String(it.id),mapId:String(it.mapId),kind:'point',type,label:String(it.label||SAFETY_TYPES[type].label),x:bound(it.x,0,100),y};
  });
- out.campusCanvasVersion=2;
+ out.campusCanvasVersion=3;
  out.nextSafetyId=Math.max(1,Number(v.nextSafetyId)||1);
  // Ver.1.6: セッションの時刻は4つだけを先に設定し、各会場の発表はセッションを参照する。
  out.sessions=clone(DEFAULT_SESSIONS);
@@ -732,8 +751,52 @@ byId('cancelLogin').onclick=()=>byId('loginModal').hidden=true;
 byId('loginForm').onsubmit=e=>{e.preventDefault();if(byId('adminPassword').value!==DEMO_ADMIN_PASSWORD){byId('loginError').textContent='パスワードが違います。';return}
  byId('loginModal').hidden=true;switchDraft();byId('adminPanel').hidden=false;renderPublic();renderAdmin();};
 byId('closeAdmin').onclick=()=>{byId('adminPanel').hidden=true;drawMode='';closeDraft();if(!audienceMode)showEntryGate();};
-$$('#adminNav button').forEach(b=>b.onclick=()=>{const t=b.dataset.admin;$$('#adminNav button').forEach(x=>x.classList.toggle('active',x===b));$$('.admin-page').forEach(x=>x.classList.toggle('active',x.id===`admin-${t}`));if(t==='venues')renderEditor();if(t==='program')renderAdminPrograms();if(t==='basic')renderBasic();if(t==='notice')renderNotice();if(t==='stampqr')renderStampQrAdmin();if(t==='years')renderYearArchives();});
-function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');byId('adminMapSelect').value=adminMap;renderEditor();renderAdminPrograms();renderBasic();renderNotice();renderStampQrAdmin();renderYearArchives();}
+function openAdminTab(t){
+ $$('#adminNav button').forEach(x=>x.classList.toggle('active',x.dataset.admin===t));
+ $$('.admin-page').forEach(x=>x.classList.toggle('active',x.id===`admin-${t}`));
+ if(t==='preflight')renderPreflight();if(t==='venues')renderEditor();if(t==='program')renderAdminPrograms();if(t==='basic')renderBasic();if(t==='notice')renderNotice();if(t==='stampqr')renderStampQrAdmin();if(t==='years')renderYearArchives();
+}
+$$('#adminNav button').forEach(b=>b.onclick=()=>openAdminTab(b.dataset.admin));
+function renderPreflight(){
+ const box=byId('preflightGrid'),score=byId('preflightScore'),badge=byId('preflightBadge');if(!box)return;
+ const dateOk=/^\d{4}-\d{2}-\d{2}$/.test(state.eventDate||'')&&String(state.year||'').trim()&&String(state.slogan||'').trim();
+ const unassigned=state.programs.filter(p=>!p.zoneId).length;
+ const programOk=state.programs.length>0&&unassigned===0;
+ const passOk=String(state.internalPasscode||'').trim().length>=8;
+ const deadline=String(state.reactionDeadline||'');
+ const lastEnd=Math.max(0,...state.programs.map(p=>timeNum(programTimes(p).end)));
+ const deadlineMinute=deadline.startsWith(state.eventDate+'T')?timeNum(deadline.slice(11,16)):-1;
+ const reactionOk=deadlineMinute>=lastEnd&&deadlineMinute>0;
+ const stampOk=Boolean(state.stampCompleteImage);
+ const safetyOk=(state.safetyItems||[]).length>0;
+ const noticeOk=Boolean(String(state.noticeTitle||'').trim()&&String(state.noticeMessage||'').trim()&&String(state.noticeIssuer||'').trim());
+ const cloudText=byId('firebasePublishSummary')?.textContent||'';
+ const sdkText=byId('firebaseSdkStatus')?.textContent||'';
+ const cloudOk=/公開中：/.test(cloudText)&&/接続準備完了/.test(sdkText);
+ const backupText=byId('publicationBackupSummary')?.textContent||'';
+ const backupOk=/直前の復元ポイント/.test(backupText);
+ const campusZones=state.zones.filter(z=>z.mapId==='campus').length;
+ const tvOk=dateOk&&state.programs.length>0;
+ const checks=[
+  {ok:cloudOk,title:'Supabase同期',detail:cloudOk?'公開データと接続を確認':'公開状態・接続を確認してください',tab:'firebase'},
+  {ok:dateOk,title:'年度・開催日・スローガン',detail:dateOk?`${state.year}年度／${state.eventDate}`:'未設定の項目があります',tab:'basic'},
+  {ok:state.zones.length>0,title:'会場登録',detail:`${state.zones.length}か所（学校全体図 ${campusZones}か所）`,tab:'venues'},
+  {ok:programOk,title:'プログラム',detail:programOk?`${state.programs.length}件／会場設定済み`:`${state.programs.length}件／会場未設定 ${unassigned}件`,tab:'program'},
+  {ok:passOk,title:'大豊学園 関係者パスコード',detail:passOk?'8文字以上で設定済み':'8文字以上で設定してください',tab:'basic'},
+  {ok:reactionOk,title:'リアクション受付期限',detail:reactionOk?deadline.replace('T',' '):'最終プログラム後の日時を確認',tab:'basic'},
+  {ok:stampOk,title:'スタンプラリー',detail:stampOk?'5個達成画像を設定済み':'5個達成画像が未設定',tab:'stampqr'},
+  {ok:safetyOk,title:'安全情報',detail:safetyOk?`${state.safetyItems.length}件登録`:'消火器・避難経路等を確認',tab:'venues'},
+  {ok:tvOk,title:'TV表示',detail:tvOk?'開催日・プログラムから自動表示':'開催日・プログラムを確認',tab:'basic'},
+  {ok:backupOk,title:'最新バックアップ',detail:backupOk?'公開前の復元ポイントあり':'復元ポイントを確認してください',tab:'data'},
+  {ok:noticeOk,title:'お知らせPDF',detail:noticeOk?'案内文を設定済み':'案内文・発行者を確認',tab:'notice'}
+ ];
+ const done=checks.filter(c=>c.ok).length,total=checks.length;
+ score.textContent=`${done}/${total}`;badge.textContent=done===total?'準備OK':'要確認';badge.classList.toggle('ok',done===total);
+ box.innerHTML=checks.map(c=>`<button type="button" class="preflight-item ${c.ok?'ok':'warn'}" data-preflight-tab="${c.tab}"><span class="preflight-icon">${c.ok?'✓':'!'}</span><span><strong>${esc(c.title)}</strong><small>${esc(c.detail)}</small></span></button>`).join('');
+ $$('[data-preflight-tab]').forEach(b=>b.onclick=()=>openAdminTab(b.dataset.preflightTab));
+}
+byId('refreshPreflight')?.addEventListener('click',()=>renderPreflight());
+function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');byId('adminMapSelect').value=adminMap;renderEditor();renderAdminPrograms();renderBasic();renderNotice();renderStampQrAdmin();renderYearArchives();renderPreflight();setTimeout(renderPreflight,500);}
 byId('adminMapSelect').onchange=e=>{adminMap=e.target.value;editId='';editDraft=null;selectedSafetyId='';drawMode='';renderEditor()};
 function renderEditor(){
  const m=getMap(adminMap);byId('adminMapSelect').value=adminMap;byId('adminMapImage').src=m.src;byId('adminMapImage').alt=m.name;
