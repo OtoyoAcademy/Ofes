@@ -34,7 +34,7 @@ const DEFAULT_DATA = {
  noticeTitle:'おおフェス（OFES）Webアプリのご案内',
  noticeMessage:'今年度のおおフェスでは、プログラムや会場案内などをスマートフォンで確認できるWebアプリ「OFES」をご利用いただけます。会場での移動や発表見学に、ぜひご活用ください。',
  noticeIssuer:'大豊学園',
- internalPasscode:'', stampCompleteImage:'',
+ internalPasscode:'', stampCompleteImage:'', surveys:[],
  test:{enabled:false,date:'2026-11-21',time:'09:25'},
  sessions:JSON.parse(JSON.stringify(DEFAULT_SESSIONS)),
  zones:[],safetyItems:[],nextSafetyId:1,nextIds:{campus:1,zenki1:1,zenki2:1,koki1:1,koki2:1,koki3:1},
@@ -135,6 +135,13 @@ function validData(v){
  out.noticeIssuer=String(v.noticeIssuer||DEFAULT_DATA.noticeIssuer);
  out.internalPasscode=String(v.internalPasscode||'');
  out.stampCompleteImage=typeof v.stampCompleteImage==='string'?v.stampCompleteImage:'';
+ const rawSurveys=Array.isArray(v.surveys)?v.surveys:[];
+ out.surveys=rawSurveys.filter(x=>x&&typeof x==='object').map((x,i)=>{
+  const target=['public','internal','both'].includes(String(x.target))?String(x.target):'both';
+  const startAt=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(x.startAt||''))?String(x.startAt):'';
+  const endAt=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(x.endAt||''))?String(x.endAt):'';
+  return {id:String(x.id||`survey-${i+1}`),title:String(x.title||'アンケート'),message:String(x.message||''),url:String(x.url||''),buttonLabel:String(x.buttonLabel||'回答する'),enabled:x.enabled!==false,target,startAt,endAt,order:Number.isFinite(Number(x.order))?Number(x.order):i+1};
+ });
  out.nextIds={...clone(DEFAULT_DATA.nextIds),...(v.nextIds||{})};
  out.test={...clone(DEFAULT_DATA.test),...(v.test||{})};
  delete out.gallery;
@@ -152,20 +159,20 @@ let editorActive=false;
 let demoDraftPreview=false;
 let state=draftState;
 let cloudAvailable=false;
-const schemaVersion=8;
+const schemaVersion=9;
 function projectPublished(src){
  const safe=validData(src);
  // テスト日時はブラウザ専用。公開データには送らず、全来場者で実時刻を使う。
  const publicPrograms=safe.programs.map(({presenters,...p})=>p);
  return {schemaVersion,campusCanvasVersion:safe.campusCanvasVersion,year:safe.year,eventDate:safe.eventDate,slogan:safe.slogan,sessions:clone(safe.sessions),
    zones:clone(safe.zones),safetyItems:clone(safe.safetyItems),nextSafetyId:safe.nextSafetyId,nextIds:clone(safe.nextIds),programs:publicPrograms,reactionDeadline:safe.reactionDeadline,
-   noticeTitle:safe.noticeTitle,noticeMessage:safe.noticeMessage,noticeIssuer:safe.noticeIssuer,stampCompleteImage:safe.stampCompleteImage};
+   noticeTitle:safe.noticeTitle,noticeMessage:safe.noticeMessage,noticeIssuer:safe.noticeIssuer,stampCompleteImage:safe.stampCompleteImage,surveys:clone(safe.surveys.filter(x=>x.target==='public'||x.target==='both'))};
 }
 function projectInternal(src){
  const safe=validData(src);
  const presenters={};
  for(const p of safe.programs){const names=String(p.presenters||'').trim();if(names)presenters[p.id]=names;}
- return {year:safe.year,passcode:String(safe.internalPasscode||''),payload:{presenters}};
+ return {year:safe.year,passcode:String(safe.internalPasscode||''),payload:{presenters,surveys:clone(safe.surveys.filter(x=>x.target==='internal'))}};
 }
 function projectArchive(src){
  const safe=validData(src);
@@ -175,6 +182,7 @@ function projectArchive(src){
  return archived;
 }
 let internalPresenterMap={};
+let internalSurveyList=[];
 let adminInternalPayload=null;
 let audienceMode='';
 function currentPresenterNames(p){
@@ -185,8 +193,9 @@ function currentPresenterNames(p){
 function presentersHtml(p,compact=false){const names=currentPresenterNames(p);return names?`<div class="program-presenters ${compact?'compact':''}"><span>児童生徒</span>${esc(names)}</div>`:'';}
 function applyAdminInternalToDraft(){
  const map=adminInternalPayload?.presenters||{};
- if(!map||typeof map!=='object')return;
- for(const p of draftState.programs||[]){if(map[p.id]&&!p.presenters)p.presenters=String(map[p.id]);}
+ if(map&&typeof map==='object'){for(const p of draftState.programs||[]){if(map[p.id]&&!p.presenters)p.presenters=String(map[p.id]);}}
+ const privateSurveys=Array.isArray(adminInternalPayload?.surveys)?adminInternalPayload.surveys:[];
+ if(privateSurveys.length){const merged=new Map((draftState.surveys||[]).map(x=>[x.id,x]));for(const item of privateSurveys)merged.set(item.id,{...item,target:'internal'});draftState.surveys=[...merged.values()];}
 }
 function acceptPublished(doc){
  try {
@@ -218,8 +227,8 @@ window.OFESCloud={
   }
 };
 window.addEventListener('ofes-cloud-published',e=>acceptPublished(e.detail?.data??null));
-window.addEventListener('ofes-internal-admin',e=>{adminInternalPayload=e.detail?.payload||null;if(editorActive){applyAdminInternalToDraft();state=draftState;persist();renderAdminPrograms();}});
-window.addEventListener('ofes-internal-access',e=>{internalPresenterMap=e.detail?.payload?.presenters||{};audienceMode='internal';sessionStorage.setItem(ACCESS_MODE_KEY,'internal');hideEntryGate();renderPublic();renderTv();});
+window.addEventListener('ofes-internal-admin',e=>{adminInternalPayload=e.detail?.payload||null;if(editorActive){applyAdminInternalToDraft();state=draftState;persist();renderAdminPrograms();renderSurveyAdmin();}});
+window.addEventListener('ofes-internal-access',e=>{internalPresenterMap=e.detail?.payload?.presenters||{};internalSurveyList=Array.isArray(e.detail?.payload?.surveys)?e.detail.payload.surveys:[];audienceMode='internal';sessionStorage.setItem(ACCESS_MODE_KEY,'internal');hideEntryGate();renderPublic();renderTv();});
 
 let visitorBuilding='campus',session='current',visitorSelected='';
 let programReturnScrollY=0;
@@ -265,6 +274,15 @@ function renderHeader(){
 }
 function setTab(tab,opts={}){if(tab!=='stamp'&&stampScannerActive)closeStampScanner();$$('.nav[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$$('.tab-view').forEach(v=>v.classList.toggle('active',v.id===`tab-${tab}`));if(tab==='venues')renderVisitorMap();if(opts.scrollTop!==false)window.scrollTo({top:0,behavior:'smooth'});}
 $$('.nav[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+function surveyNowKey(){const v=viewTime();return `${v.date}T${v.time}`;}
+function surveyIsActive(item){if(!item||item.enabled===false||!String(item.url||'').trim())return false;const now=surveyNowKey();if(item.startAt&&now<item.startAt)return false;if(item.endAt&&now>item.endAt)return false;return true;}
+function visibleSurveys(){
+ let list=Array.isArray(state.surveys)?state.surveys.slice():[];
+ if(audienceMode==='internal'&&internalSurveyList.length){const merged=new Map(list.map(x=>[x.id,x]));for(const x of internalSurveyList)merged.set(x.id,{...x,target:'internal'});list=[...merged.values()];}
+ return list.filter(x=>{if(!surveyIsActive(x))return false;if(audienceMode==='internal')return x.target==='internal'||x.target==='both'||x.target==='public';return x.target==='public'||x.target==='both';}).sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0)||String(a.title).localeCompare(String(b.title),'ja'));
+}
+function renderSurveys(){const panel=byId('surveyPanel'),cards=byId('surveyCards');if(!panel||!cards)return;const list=visibleSurveys();panel.hidden=!list.length;if(!list.length){cards.innerHTML='';return;}const label=byId('surveyAudienceLabel');if(label)label.textContent=audienceMode==='internal'?'大豊学園向けを含む':'来場者向け';cards.innerHTML=list.map(x=>`<article class="survey-card"><div><strong>${esc(x.title)}</strong>${x.message?`<p>${esc(x.message).replace(/\n/g,'<br>')}</p>`:''}${x.endAt?`<small>回答期間：〜 ${esc(x.endAt.replace('T',' '))}</small>`:''}</div><a class="survey-link" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.buttonLabel||'回答する')} ↗</a></article>`).join('');}
+
 function renderProgram(){
  const filteredOrdered=orderedPrograms();
  const v=viewTime(),active=activePrograms();
@@ -692,12 +710,12 @@ function renderAudienceMode(){
 }
 function showEntryGate(){byId('entryGate').hidden=false;byId('internalLoginForm').hidden=true;byId('internalLoginMessage').textContent='';}
 function hideEntryGate(){byId('entryGate').hidden=true;}
-function choosePublic(){audienceMode='public';internalPresenterMap={};sessionStorage.setItem(ACCESS_MODE_KEY,'public');hideEntryGate();renderPublic();}
+function choosePublic(){audienceMode='public';internalPresenterMap={};internalSurveyList=[];sessionStorage.setItem(ACCESS_MODE_KEY,'public');hideEntryGate();renderPublic();}
 byId('enterPublic')?.addEventListener('click',choosePublic);
 byId('openInternalLogin')?.addEventListener('click',()=>{byId('internalLoginForm').hidden=false;byId('internalPasscodeInput').value='';byId('internalLoginMessage').textContent='';byId('internalPasscodeInput').focus();});
 byId('cancelInternalLogin')?.addEventListener('click',()=>{byId('internalLoginForm').hidden=true;byId('internalLoginMessage').textContent='';});
-byId('internalLoginForm')?.addEventListener('submit',async e=>{e.preventDefault();const pass=byId('internalPasscodeInput').value.trim(),msg=byId('internalLoginMessage');if(!pass)return;msg.textContent='確認しています…';try{if(!window.OFESInternal?.verify)throw Error('Supabase接続準備中です。少し待ってからもう一度お試しください。');const payload=await window.OFESInternal.verify(state.year,pass);if(!payload)throw Error('パスコードが正しくありません。');internalPresenterMap=payload.presenters||{};audienceMode='internal';sessionStorage.setItem(ACCESS_MODE_KEY,'internal');hideEntryGate();renderPublic();}catch(err){msg.textContent=err.message||'パスコードを確認できませんでした。';}});
-byId('backToEntry')?.addEventListener('click',()=>{audienceMode='';internalPresenterMap={};sessionStorage.removeItem(ACCESS_MODE_KEY);showEntryGate();renderAudienceMode();});
+byId('internalLoginForm')?.addEventListener('submit',async e=>{e.preventDefault();const pass=byId('internalPasscodeInput').value.trim(),msg=byId('internalLoginMessage');if(!pass)return;msg.textContent='確認しています…';try{if(!window.OFESInternal?.verify)throw Error('Supabase接続準備中です。少し待ってからもう一度お試しください。');const payload=await window.OFESInternal.verify(state.year,pass);if(!payload)throw Error('パスコードが正しくありません。');internalPresenterMap=payload.presenters||{};internalSurveyList=Array.isArray(payload.surveys)?payload.surveys:[];audienceMode='internal';sessionStorage.setItem(ACCESS_MODE_KEY,'internal');hideEntryGate();renderPublic();}catch(err){msg.textContent=err.message||'パスコードを確認できませんでした。';}});
+byId('backToEntry')?.addEventListener('click',()=>{audienceMode='';internalPresenterMap={};internalSurveyList=[];sessionStorage.removeItem(ACCESS_MODE_KEY);showEntryGate();renderAudienceMode();renderSurveys();});
 byId('entryAdmin')?.addEventListener('click',()=>{hideEntryGate();byId('openAdmin').click();});
 
 function tvPeople(p){const names=currentPresenterNames(p);const publicPeople=[p.grade,p.group].filter(Boolean).join(' ');return names?`${publicPeople}${publicPeople?' / ':''}${names}`:(publicPeople||'発表者');}
@@ -743,7 +761,7 @@ async function deleteYearArchive(year){if(!confirm(`${year}年度の保存デー
 byId('saveYearArchive')?.addEventListener('click',async()=>{const msg=byId('yearArchiveMessage');try{if(!window.OFESArchives)throw Error('Supabase接続準備中です。');if(!confirm(`${state.year}年度の現在の下書きを年度データとして保存しますか？`))return;await window.OFESArchives.save(projectArchive(draftState));msg.textContent=`${state.year}年度を保存しました。`;await renderYearArchives();}catch(err){msg.textContent=`保存できませんでした：${err.message||err}`;}});
 byId('refreshYearArchives')?.addEventListener('click',renderYearArchives);
 
-function renderPublic(){renderHeader();renderProgram();renderVisitorMap();renderStamps();renderAudienceMode();if(!byId('tvPanel').hidden)renderTv();}
+function renderPublic(){renderHeader();renderProgram();renderSurveys();renderVisitorMap();renderStamps();renderAudienceMode();if(!byId('tvPanel').hidden)renderTv();}
 
 // 管理画面へのアクセスはブラウザ試作用の簡易パスワード。外部の書込権限には用いない。
 byId('openAdmin').onclick=()=>{reactionPreviewMode=false;reactionPreviewProgram=null;byId('loginModal').hidden=false;byId('adminPassword').value='';byId('loginError').textContent='';byId('adminPassword').focus()};
@@ -754,7 +772,7 @@ byId('closeAdmin').onclick=()=>{byId('adminPanel').hidden=true;drawMode='';close
 function openAdminTab(t){
  $$('#adminNav button').forEach(x=>x.classList.toggle('active',x.dataset.admin===t));
  $$('.admin-page').forEach(x=>x.classList.toggle('active',x.id===`admin-${t}`));
- if(t==='preflight')renderPreflight();if(t==='venues')renderEditor();if(t==='program')renderAdminPrograms();if(t==='basic')renderBasic();if(t==='notice')renderNotice();if(t==='stampqr')renderStampQrAdmin();if(t==='years')renderYearArchives();
+ if(t==='preflight')renderPreflight();if(t==='venues')renderEditor();if(t==='program')renderAdminPrograms();if(t==='basic')renderBasic();if(t==='surveys')renderSurveyAdmin();if(t==='notice')renderNotice();if(t==='stampqr')renderStampQrAdmin();if(t==='years')renderYearArchives();
 }
 $$('#adminNav button').forEach(b=>b.onclick=()=>openAdminTab(b.dataset.admin));
 function renderPreflight(){
@@ -796,7 +814,7 @@ function renderPreflight(){
  $$('[data-preflight-tab]').forEach(b=>b.onclick=()=>openAdminTab(b.dataset.preflightTab));
 }
 byId('refreshPreflight')?.addEventListener('click',()=>renderPreflight());
-function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');byId('adminMapSelect').value=adminMap;renderEditor();renderAdminPrograms();renderBasic();renderNotice();renderStampQrAdmin();renderYearArchives();renderPreflight();setTimeout(renderPreflight,500);}
+function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');byId('adminMapSelect').value=adminMap;renderEditor();renderAdminPrograms();renderBasic();renderSurveyAdmin();renderNotice();renderStampQrAdmin();renderYearArchives();renderPreflight();setTimeout(renderPreflight,500);}
 byId('adminMapSelect').onchange=e=>{adminMap=e.target.value;editId='';editDraft=null;selectedSafetyId='';drawMode='';renderEditor()};
 function renderEditor(){
  const m=getMap(adminMap);byId('adminMapSelect').value=adminMap;byId('adminMapImage').src=m.src;byId('adminMapImage').alt=m.name;
@@ -1102,6 +1120,10 @@ function appPublicUrl(){
  const here=(location.protocol==='http:'||location.protocol==='https:')?location.origin+location.pathname:STAMP_BASE_URL;
  return here.endsWith('/')?here:here.replace(/\/[^/]*$/,'/');
 }
+function surveyTargetLabel(v){return ({both:'一般＋大豊学園',public:'一般来場者',internal:'大豊学園のみ'})[v]||'一般＋大豊学園';}
+function renderSurveyAdmin(){const box=byId('surveyAdminList');if(!box)return;const list=(state.surveys||[]).slice().sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0));box.innerHTML=list.length?list.map((x,i)=>`<article class="editor-card survey-admin-item" data-survey-id="${esc(x.id)}"><div class="survey-admin-head"><div><strong>${esc(x.title||`アンケート${i+1}`)}</strong><span>${esc(surveyTargetLabel(x.target))}</span></div><label class="check"><input type="checkbox" data-survey-field="enabled" ${x.enabled!==false?'checked':''}> 表示する</label></div><div class="survey-form-grid"><label>アンケート名<input data-survey-field="title" value="${esc(x.title)}" maxlength="80"></label><label>対象<select data-survey-field="target"><option value="both" ${x.target==='both'?'selected':''}>一般＋大豊学園</option><option value="public" ${x.target==='public'?'selected':''}>一般来場者のみ</option><option value="internal" ${x.target==='internal'?'selected':''}>大豊学園のみ</option></select></label><label class="survey-span-2">案内文<textarea data-survey-field="message" rows="3" maxlength="500">${esc(x.message)}</textarea></label><label class="survey-span-2">GoogleフォームURL<input data-survey-field="url" type="url" value="${esc(x.url)}" placeholder="https://docs.google.com/forms/..."></label><label>ボタン名<input data-survey-field="buttonLabel" value="${esc(x.buttonLabel||'回答する')}" maxlength="40"></label><label>表示順<input data-survey-field="order" type="number" min="1" max="99" value="${Number(x.order)||i+1}"></label><label>表示開始（任意）<input data-survey-field="startAt" type="datetime-local" value="${esc(x.startAt||'')}"></label><label>表示終了（任意）<input data-survey-field="endAt" type="datetime-local" value="${esc(x.endAt||'')}"></label></div><div class="row-actions"><button type="button" class="btn danger" data-delete-survey="${esc(x.id)}">削除</button></div><p class="caption">${x.target==='internal'?'このURLは一般公開データには含めません。大豊学園関係者用パスコードで入った人だけに表示します。':'来場者画面ではURL文字列ではなく、ボタンとして表示します。'}</p></article>`).join(''):'<div class="editor-card"><p class="muted">アンケートはまだ登録されていません。「＋ アンケートを追加」から必要な数だけ登録してください。</p></div>';box.querySelectorAll('[data-survey-field]').forEach(el=>el.addEventListener('change',e=>{const card=e.target.closest('[data-survey-id]'),item=state.surveys.find(v=>v.id===card?.dataset.surveyId);if(!item)return;const field=e.target.dataset.surveyField;item[field]=field==='enabled'?e.target.checked:field==='order'?Number(e.target.value)||1:e.target.value;if(field==='url'&&item.url&&!/^https:\/\//i.test(item.url)){alert('URLは https:// から始まる形式で入力してください。');item.url='';}persist();renderSurveyAdmin();renderSurveys();toast('アンケート設定を保存しました');}));box.querySelectorAll('[data-delete-survey]').forEach(b=>b.onclick=()=>{const id=b.dataset.deleteSurvey;if(!confirm('このアンケート設定を削除しますか？'))return;state.surveys=state.surveys.filter(x=>x.id!==id);persist();renderSurveyAdmin();renderSurveys();});}
+byId('addSurvey')?.addEventListener('click',()=>{const n=(state.surveys||[]).length+1;state.surveys.push({id:`survey-${Date.now()}`,title:`アンケート${n}`,message:'アンケートへのご協力をお願いします。',url:'',buttonLabel:'回答する',enabled:true,target:'both',startAt:'',endAt:'',order:n});persist();renderSurveyAdmin();toast('アンケートを追加しました');});
+
 function renderNotice(){
  byId('noticeTitle').value=state.noticeTitle||DEFAULT_DATA.noticeTitle;
  byId('noticeMessage').value=state.noticeMessage||DEFAULT_DATA.noticeMessage;
@@ -1156,7 +1178,7 @@ byId('printNotice').onclick=()=>{
  w.document.open();w.document.write(html);w.document.close();
 };
 
-byId('exportJson').onclick=()=>{const blob=new Blob([JSON.stringify({version:16,data:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`OFES_${state.year}_backup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);};
+byId('exportJson').onclick=()=>{const blob=new Blob([JSON.stringify({version:17,data:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`OFES_${state.year}_backup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);};
 byId('importJson').onchange=async e=>{
  const f=e.target.files?.[0];if(!f)return;
  const status=byId('importJsonStatus');
@@ -1201,4 +1223,4 @@ setTimeout(()=>{
  }
 },16000);
 window.addEventListener('resize',()=>{if($('#tab-venues').classList.contains('active'))sizeVisibleFloorMaps();});
-setInterval(()=>{if(!state.test.enabled){renderHeader();renderProgram();if($('#tab-venues').classList.contains('active'))renderVisitorMap();renderTv();}},30000);
+setInterval(()=>{if(!state.test.enabled){renderHeader();renderProgram();renderSurveys();if($('#tab-venues').classList.contains('active'))renderVisitorMap();renderTv();}},30000);
