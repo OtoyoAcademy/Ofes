@@ -238,6 +238,21 @@ async function collectOneTarget(group){
   return {reactionId:group.reactionId,title:p.title,grade:p.grade||'全体・その他',gradeLabels:gradeLabels(p.grade),groupName:p.group||'（グループ名なし）',counts,respondents:(votes||[]).length,schedules,zoneName:zones.join('／')};
 }
 
+// Ver.1.33: 写真コラージュから既存のリアクション集計を利用するための管理者向けAPI。
+window.OFESPhotoReactions={
+  collect:async(reactionIds)=>{
+    if(!isAdmin())throw Error('Supabaseの管理者ログインが必要です。');
+    if(!publishedData?.eventDate)throw Error('Supabaseの公開データがありません。先に公開データを確認してください。');
+    const ids=[...new Set((Array.isArray(reactionIds)?reactionIds:[]).map(String).filter(Boolean))];
+    const groups=reactionTargetGroups().filter(g=>ids.includes(String(g.reactionId)));
+    if(!groups.length)throw Error('公開済みデータに対応するリアクション対象発表がありません。');
+    const items=[];for(const g of groups)items.push(await collectOneTarget(g));
+    const counts=Object.fromEntries(REACTION_KEYS.map(k=>[k,0]));
+    for(const item of items)for(const k of REACTION_KEYS)counts[k]+=Number(item.counts?.[k]||0);
+    return {counts,respondents:items.reduce((n,x)=>n+Number(x.respondents||0),0),targetCount:items.length,items};
+  }
+};
+
 // -------- Reaction stats / PDF --------
 const statsButton=el('reactionStatsLoad'),statsMessage=el('reactionStatsMessage'),statsOut=el('reactionStatsResult');
 statsButton?.addEventListener('click',async()=>{

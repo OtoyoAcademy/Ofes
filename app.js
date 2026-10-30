@@ -34,7 +34,7 @@ const DEFAULT_DATA = {
  noticeTitle:'おおフェス（OFES）Webアプリのご案内',
  noticeMessage:'今年度のおおフェスでは、プログラムや会場案内などをスマートフォンで確認できるWebアプリ「OFES」をご利用いただけます。会場での移動や発表見学に、ぜひご活用ください。',
  noticeIssuer:'大豊学園',
- internalPasscode:'', stampCompleteImage:'', surveys:[],
+ internalPasscode:'', stampCompleteImage:'', stampHints:['','','','',''], surveys:[],
  test:{enabled:false,date:'2026-11-21',time:'09:25'},
  sessions:JSON.parse(JSON.stringify(DEFAULT_SESSIONS)),
  zones:[],safetyItems:[],nextSafetyId:1,nextIds:{campus:1,zenki1:1,zenki2:1,koki1:1,koki2:1,koki3:1},
@@ -135,6 +135,7 @@ function validData(v){
  out.noticeIssuer=String(v.noticeIssuer||DEFAULT_DATA.noticeIssuer);
  out.internalPasscode=String(v.internalPasscode||'');
  out.stampCompleteImage=typeof v.stampCompleteImage==='string'?v.stampCompleteImage:'';
+ out.stampHints=Array.from({length:5},(_,i)=>String(Array.isArray(v.stampHints)?(v.stampHints[i]||''):''));
  const rawSurveys=Array.isArray(v.surveys)?v.surveys:[];
  out.surveys=rawSurveys.filter(x=>x&&typeof x==='object').map((x,i)=>{
   const target=['public','internal','both'].includes(String(x.target))?String(x.target):'both';
@@ -159,14 +160,14 @@ let editorActive=false;
 let demoDraftPreview=false;
 let state=draftState;
 let cloudAvailable=false;
-const schemaVersion=9;
+const schemaVersion=10;
 function projectPublished(src){
  const safe=validData(src);
  // テスト日時はブラウザ専用。公開データには送らず、全来場者で実時刻を使う。
  const publicPrograms=safe.programs.map(({presenters,...p})=>p);
  return {schemaVersion,campusCanvasVersion:safe.campusCanvasVersion,year:safe.year,eventDate:safe.eventDate,slogan:safe.slogan,sessions:clone(safe.sessions),
    zones:clone(safe.zones),safetyItems:clone(safe.safetyItems),nextSafetyId:safe.nextSafetyId,nextIds:clone(safe.nextIds),programs:publicPrograms,reactionDeadline:safe.reactionDeadline,
-   noticeTitle:safe.noticeTitle,noticeMessage:safe.noticeMessage,noticeIssuer:safe.noticeIssuer,stampCompleteImage:safe.stampCompleteImage,surveys:clone(safe.surveys.filter(x=>x.target==='public'||x.target==='both'))};
+   noticeTitle:safe.noticeTitle,noticeMessage:safe.noticeMessage,noticeIssuer:safe.noticeIssuer,stampCompleteImage:safe.stampCompleteImage,stampHints:clone(safe.stampHints),surveys:clone(safe.surveys.filter(x=>x.target==='public'||x.target==='both'))};
 }
 function projectInternal(src){
  const safe=validData(src);
@@ -534,7 +535,7 @@ function renderStamps(){
    ? `<strong>🎉 5 / 5　コンプリート！</strong><span>5つのスタンプがそろいました。</span>`
    : `<strong>獲得スタンプ：${a.length} / 5</strong><span>あと ${5-a.length} 個です。</span>`;
  }
- byId('stampCards').innerHTML=[1,2,3,4,5].map(i=>`<div class="stamp-item ${a.includes(i)?'got':''}"><div class="star">⭐</div><b>STAMP ${i}</b><small>${a.includes(i)?'取得済み':'未取得'}</small></div>`).join('');
+ byId('stampCards').innerHTML=[1,2,3,4,5].map(i=>{const hint=String(state.stampHints?.[i-1]||'').trim();return `<div class="stamp-item ${a.includes(i)?'got':''}"><div class="star">⭐</div><b>STAMP ${i}</b><small>${a.includes(i)?'取得済み':'未取得'}</small>${hint?`<details class="stamp-hint"><summary>💡 ヒントを見る</summary><p>${esc(hint)}</p></details>`:''}</div>`;}).join('');
  const panel=byId('stampCompletePanel'),img=byId('stampCompleteImage');
  if(panel){panel.hidden=a.length!==5;if(a.length===5){if(state.stampCompleteImage){img.src=state.stampCompleteImage;img.hidden=false;}else{img.removeAttribute('src');img.hidden=true;}}}
 }
@@ -746,6 +747,8 @@ async function compressStampImage(file){
 }
 byId('stampCompleteImageFile')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;const msg=byId('stampCompleteImageMessage');msg.textContent='画像を調整しています…';try{state.stampCompleteImage=await compressStampImage(f);if(!persist())throw Error('ブラウザへ保存できませんでした。');renderStampQrAdmin();renderStamps();msg.textContent='画像を保存しました。「データ保存」からSupabaseへ公開すると来場者にも反映されます。';}catch(err){msg.textContent=`画像を保存できませんでした：${err.message}`;}finally{e.target.value='';}});
 byId('removeStampCompleteImage')?.addEventListener('click',()=>{if(!state.stampCompleteImage)return;state.stampCompleteImage='';persist();renderStampQrAdmin();renderStamps();byId('stampCompleteImageMessage').textContent='画像を削除しました。';});
+byId('saveStampHints')?.addEventListener('click',()=>{state.stampHints=Array.from({length:5},(_,i)=>String(byId(`stampHint${i+1}`)?.value||'').trim());persist();renderStamps();const msg=byId('stampHintMessage');if(msg)msg.textContent='ヒントを保存しました。「データ保存」からSupabaseへ公開すると来場者にも反映されます。';toast('スタンプのヒントを保存しました');});
+byId('resetStampProgress')?.addEventListener('click',()=>{const current=stampList();if(!current.length){const msg=byId('stampResetMessage');if(msg)msg.textContent='この端末には取得済みスタンプがありません。';return;}if(!confirm(`この端末で取得済みのスタンプ ${current.length}個をすべてリセットします。よろしいですか？`))return;try{localStorage.removeItem(STAMP_KEY);renderStamps();showStampMessage('この端末のスタンプ取得状況をリセットしました。','info');const msg=byId('stampResetMessage');if(msg)msg.textContent='①〜⑤の取得状況をすべてリセットしました。もう一度QRコードを読み取れます。';toast('スタンプ取得状況をリセットしました');}catch(err){const msg=byId('stampResetMessage');if(msg)msg.textContent='リセットできませんでした。ブラウザの保存設定をご確認ください。';}});
 
 async function renderYearArchives(){
  const box=byId('yearArchiveList'),msg=byId('yearArchiveMessage');if(!box)return;
@@ -802,7 +805,7 @@ function renderPreflight(){
   {ok:programOk,title:'プログラム',detail:programOk?`${state.programs.length}件／会場設定済み`:`${state.programs.length}件／会場未設定 ${unassigned}件`,tab:'program'},
   {ok:passOk,title:'大豊学園 関係者パスコード',detail:passOk?'8文字以上で設定済み':'8文字以上で設定してください',tab:'basic'},
   {ok:reactionOk,title:'リアクション受付期限',detail:reactionOk?deadline.replace('T',' '):'最終プログラム後の日時を確認',tab:'basic'},
-  {ok:stampOk,title:'スタンプラリー',detail:stampOk?'5個達成画像を設定済み':'5個達成画像が未設定',tab:'stampqr'},
+  {ok:stampOk,title:'スタンプラリー',detail:`${stampOk?'5個達成画像を設定済み':'5個達成画像が未設定'}／ヒント ${(state.stampHints||[]).filter(x=>String(x).trim()).length}/5`,tab:'stampqr'},
   {ok:safetyOk,title:'安全情報',detail:safetyOk?`${state.safetyItems.length}件登録`:'消火器・避難経路等を確認',tab:'venues'},
   {ok:tvOk,title:'TV表示',detail:tvOk?'開催日・プログラムから自動表示':'開催日・プログラムを確認',tab:'basic'},
   {ok:backupOk,title:'最新バックアップ',detail:backupOk?'公開前の復元ポイントあり':'復元ポイントを確認してください',tab:'data'},
@@ -933,6 +936,35 @@ function roomOptions(sel){return `<option value="">（会場未登録）</option
 function sessionOptions(sel){return SESSION_IDS.map(id=>`<option value="${id}" ${id===sel?'selected':''}>${esc(sessionLabel(id))}（${esc(sessionDef(id).start)}〜${esc(sessionDef(id).end)}）</option>`).join('')}
 function sessionProgramsForVenue(zoneId){return orderedPrograms().filter(p=>p.zoneId===zoneId&&SESSION_IDS.includes(p.session))}
 function hasDuplicateVenueSession(program){return state.programs.some(p=>p.id!==program.id&&p.zoneId===program.zoneId&&p.session===program.session&&SESSION_IDS.includes(p.session))}
+function parseCsvRows(text){
+ const rows=[];let row=[],cell='',quoted=false;
+ const src=String(text||'').replace(/^\uFEFF/,'');
+ for(let i=0;i<src.length;i++){
+  const ch=src[i];
+  if(quoted){if(ch==='"'&&src[i+1]==='"'){cell+='"';i++;}else if(ch==='"')quoted=false;else cell+=ch;continue;}
+  if(ch==='"'){quoted=true;continue;}if(ch===','){row.push(cell);cell='';continue;}
+  if(ch==='\n'){row.push(cell.replace(/\r$/,''));rows.push(row);row=[];cell='';continue;}cell+=ch;
+ }
+ if(cell!==''||row.length){row.push(cell.replace(/\r$/,''));rows.push(row);}return rows;
+}
+function normalizeCsvSession(v){const x=String(v||'').trim().replace(/^セッション/,'');const m={'①':'s1','1':'s1','s1':'s1','②':'s2','2':'s2','s2':'s2','③':'s3','3':'s3','s3':'s3','④':'s4','4':'s4','s4':'s4'};return m[x]||'';}
+function csvTimeValid(v){return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v||'').trim());}
+async function readCsvFile(file){const buf=await file.arrayBuffer();let text=new TextDecoder('utf-8').decode(buf);if(text.includes('�')){try{const sjis=new TextDecoder('shift_jis').decode(buf);if((sjis.match(/�/g)||[]).length<(text.match(/�/g)||[]).length)text=sjis;}catch{}}return text;}
+function parseProgramCsv(text,mode){
+ const rows=parseCsvRows(text);const headerAt=rows.findIndex(r=>String(r[0]||'').trim()==='種別');if(headerAt<0)throw Error('「種別」から始まる見出し行が見つかりません。OFESのCSV様式を使用してください。');
+ const headers=rows[headerAt].map(x=>String(x||'').trim());const need=['種別','セッション','開始時刻','終了時刻','会場ID','発表学年','発表グループ','発表内容','児童生徒名（大豊学園のみ）'];
+ for(const h of need)if(!headers.includes(h))throw Error(`必要な列「${h}」がありません。`);
+ const idx=Object.fromEntries(headers.map((h,i)=>[h,i])),out=[],errors=[];const existing=mode==='append'?[...state.programs]:[];const seen=new Set(existing.filter(p=>SESSION_IDS.includes(p.session)&&p.zoneId).map(p=>`${p.zoneId}|${p.session}`));
+ for(let ri=headerAt+1;ri<rows.length;ri++){
+  const r=rows[ri],first=String(r[0]||'').trim();if(!r.some(x=>String(x||'').trim())||first.startsWith('#'))continue;
+  const type=String(r[idx['種別']]||'').trim(),sessionRaw=String(r[idx['セッション']]||'').trim(),start=String(r[idx['開始時刻']]||'').trim(),end=String(r[idx['終了時刻']]||'').trim(),zoneId=String(r[idx['会場ID']]||'').trim(),grade=String(r[idx['発表学年']]||'').trim(),group=String(r[idx['発表グループ']]||'').trim(),title=String(r[idx['発表内容']]||'').trim(),presenters=String(r[idx['児童生徒名（大豊学園のみ）']]||'').trim();
+  const line=ri+1;if(!title){errors.push(`${line}行目：発表内容が空欄です。`);continue;}
+  let session='';if(type==='セッション'){session=normalizeCsvSession(sessionRaw);if(!session){errors.push(`${line}行目：セッションは①〜④を入力してください。`);continue;}if(!zoneId||!state.zones.some(z=>z.id===zoneId)){errors.push(`${line}行目：会場ID「${zoneId||'（空欄）'}」が登録されていません。`);continue;}const key=`${zoneId}|${session}`;if(seen.has(key)){errors.push(`${line}行目：${zoneId} の ${sessionLabel(session)} はすでに登録されています。`);continue;}seen.add(key);const d=sessionDef(session);out.push({id:`p${Date.now()}-${ri}`,reactionId:'',session,start:d.start,end:d.end,grade,group,title,zoneId,presenters});}
+  else if(type==='午後'||type==='その他'){session=type==='午後'?'afternoon':'other';if(!csvTimeValid(start)||!csvTimeValid(end)){errors.push(`${line}行目：開始時刻・終了時刻を HH:MM で入力してください。`);continue;}if(timeNum(end)<=timeNum(start)){errors.push(`${line}行目：終了時刻は開始時刻より後にしてください。`);continue;}if(zoneId&&!state.zones.some(z=>z.id===zoneId)){errors.push(`${line}行目：会場ID「${zoneId}」が登録されていません。`);continue;}out.push({id:`p${Date.now()}-${ri}`,reactionId:'',session,start,end,grade,group,title,zoneId,presenters});}
+  else errors.push(`${line}行目：種別は「セッション」「午後」「その他」のいずれかを入力してください。`);
+ }
+ if(errors.length)throw Error(`CSVに修正が必要な箇所があります。\n${errors.slice(0,12).join('\n')}${errors.length>12?`\nほか ${errors.length-12}件`:''}`);if(!out.length)throw Error('読み込めるプログラムがありません。');return out;
+}
 function renderAdminPrograms(){
  if(!adminProgramVenue || !state.zones.some(z=>z.id===adminProgramVenue))adminProgramVenue=state.zones[0]?.id||'';
  const selectedZone=getZone(adminProgramVenue);
@@ -993,28 +1025,28 @@ function demoProgramRows(){
  // 発表内容と会場はデモ用に再構成し、最大4会場×4セッションで1〜9年生を確認できるようにする。
  const plan={
   s1:[
-   {grade:'1年生',group:'A班',title:'学校のすてきを見つけよう'},
-   {grade:'4年生',group:'A班',title:'大豊町の自然を調べよう'},
-   {grade:'6年生',group:'A班',title:'地域の魅力を伝えよう'},
-   {grade:'9年生',group:'A班',title:'未来の大豊町を考える'}
+   {grade:'1年生',group:'A班',title:'学校のすてきを見つけよう',presenters:'山田 はる・田中 そうた'},
+   {grade:'4年生',group:'A班',title:'大豊町の自然を調べよう',presenters:'佐藤 ひなた・小林 りく'},
+   {grade:'6年生',group:'A班',title:'地域の魅力を伝えよう',presenters:'高橋 ゆい・伊藤 けん'},
+   {grade:'9年生',group:'A班',title:'未来の大豊町を考える',presenters:'中村 あおい・松本 れん'}
   ],
   s2:[
-   {grade:'3年生',group:'A班',title:'町たんけんで見つけたこと'},
-   {grade:'6年生',group:'B班',title:'大豊町の課題とこれから'},
-   {grade:'7年生',group:'A班',title:'ふるさと大豊の魅力'},
-   {grade:'9年生',group:'B班',title:'地域を元気にするアイデア'}
+   {grade:'3年生',group:'A班',title:'町たんけんで見つけたこと',presenters:'井上 みお・木村 そう'},
+   {grade:'6年生',group:'B班',title:'大豊町の課題とこれから',presenters:'林 さくら・森 はると'},
+   {grade:'7年生',group:'A班',title:'ふるさと大豊の魅力',presenters:'山本 ひかり・藤田 かい'},
+   {grade:'9年生',group:'B班',title:'地域を元気にするアイデア',presenters:'岡田 みなみ・前田 しゅん'}
   ],
   s3:[
-   {grade:'2年生',group:'A班',title:'大豊町のすてきな場所'},
-   {grade:'5年生',group:'A班',title:'大豊町の産業を調べよう'},
-   {grade:'8年生',group:'A班',title:'探究学習の成果発表'},
-   {grade:'7年生・8年生',group:'合同A班',title:'大豊町の魅力を未来へ'}
+   {grade:'2年生',group:'A班',title:'大豊町のすてきな場所',presenters:'橋本 えま・石川 りお'},
+   {grade:'5年生',group:'A班',title:'大豊町の産業を調べよう',presenters:'近藤 なお・清水 こう'},
+   {grade:'8年生',group:'A班',title:'探究学習の成果発表',presenters:'吉田 まい・山口 たいち'},
+   {grade:'7年生・8年生',group:'合同A班',title:'大豊町の魅力を未来へ',presenters:'斎藤 りん・加藤 ゆう・村上 そら'}
   ],
   s4:[
-   {grade:'2年生',group:'B班',title:'地域の人に聞いてみよう'},
-   {grade:'4年生',group:'B班',title:'大豊町の文化を伝えよう'},
-   {grade:'5年生',group:'B班',title:'地域を支える仕事'},
-   {grade:'8年生',group:'B班',title:'私たちが考える大豊町の未来'}
+   {grade:'2年生',group:'B班',title:'地域の人に聞いてみよう',presenters:'池田 ひな・阿部 るい'},
+   {grade:'4年生',group:'B班',title:'大豊町の文化を伝えよう',presenters:'西村 ゆな・福田 かなた'},
+   {grade:'5年生',group:'B班',title:'地域を支える仕事',presenters:'太田 みさき・藤井 こうた'},
+   {grade:'8年生',group:'B班',title:'私たちが考える大豊町の未来',presenters:'長谷川 あかり・青木 はやと'}
   ]
  };
  const rows=[];
@@ -1025,7 +1057,7 @@ function demoProgramRows(){
    const item=plan[sid][roomIndex];
    rows.push({
     id:`demo-${sid}-${roomIndex+1}`,reactionId:'',session:sid,start:d.start,end:d.end,
-    grade:item.grade,group:item.group,title:item.title,zoneId:room.id
+    grade:item.grade,group:item.group,title:item.title,zoneId:room.id,presenters:item.presenters||''
    });
   });
  });
@@ -1034,7 +1066,10 @@ function demoProgramRows(){
 function demoWholeProgramRows(){
  const pool=demoVenuePool();
  const hall=demoHallZoneId(pool);
- const r=(id,session,start,end,grade,group,title,zoneId='')=>({id:`demo-${id}`,reactionId:'',session,start,end,grade,group,title,zoneId});
+ const demoNames={
+  'pm01':'鈴木 りこ・中川 けい','pm02':'後期生徒 有志メンバー','pm03':'音楽クラブ メンバー','pm04':'吉田 まい・山口 たいち','pm05':'長谷川 あかり・青木 はやと','pm06':'石井 かな・森本 りょう','pm07':'山本 ひかり・松本 れん','pm08':'高橋 ゆい・藤田 かい','pm09':'斎藤 りん・村上 そら','pm10':'中村 あおい','pm11':'吹奏楽部 メンバー'
+ };
+ const r=(id,session,start,end,grade,group,title,zoneId='')=>({id:`demo-${id}`,reactionId:'',session,start,end,grade,group,title,zoneId,presenters:demoNames[id]||''});
  return [
   r('opening','other','08:45','09:05','','','開会行事',hall),
   r('attraction','other','09:05','09:20','','','アトラクション',hall),
@@ -1079,7 +1114,7 @@ function addDemoPrograms(){
  demoDraftPreview=true;session='s1';visitorSelected='';state=draftState;
  persist();renderAdminPrograms();renderPublic();
  const afternoonCount=whole.filter(p=>p.session==='afternoon').length;
- const msg=byId('demoDataMessage');if(msg)msg.textContent=`2025年度プログラムの流れを参考に、午前${morning.length}件（最大4会場×4セッション）と午後${afternoonCount}件のリアクション対象ステージを含むデモデータを登録しました。1〜9年生、複数グループ、合同発表を確認できます。この端末では会場案内に即時反映されます。`;
+ const msg=byId('demoDataMessage');if(msg)msg.textContent=`2025年度プログラムの流れを参考に、午前${morning.length}件（最大4会場×4セッション）と午後${afternoonCount}件のリアクション対象ステージを含むデモデータを登録しました。1〜9年生、複数グループ、合同発表、架空の児童生徒名を確認できます。この端末では会場案内に即時反映されます。`;
  toast('2025年度プログラム参考のデモデータを登録しました');
 }
 function removeDemoPrograms(){
@@ -1101,7 +1136,11 @@ function bindAdminProgramEvents(){
  byId('addVenueProgram')?.addEventListener('click',()=>{if(!adminProgramVenue)return;const used=new Set(sessionProgramsForVenue(adminProgramVenue).map(p=>p.session));const sid=SESSION_IDS.find(id=>!used.has(id));if(!sid){alert('この会場にはセッション①〜④がすべて登録されています。');return;}const d=sessionDef(sid);state.programs.push({id:'p'+Date.now(),reactionId:'',session:sid,start:d.start,end:d.end,grade:'',group:'',title:'',zoneId:adminProgramVenue,presenters:''});persist();renderAdminPrograms();renderPublic();toast(`${sessionLabel(sid)}の入力欄を追加しました`)});
  byId('addAfternoonProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'afternoon',start:'13:00',end:'13:20',grade:'',group:'',title:'新しい午後プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('午後プログラムを追加しました')});
  byId('addOtherProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'other',start:'08:30',end:'08:50',grade:'',group:'',title:'新しい全体プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('全体プログラムを追加しました')});
- byId('addDemoData')?.addEventListener('click',addDemoPrograms);
+ byId('importProgramCsv')?.addEventListener('click',async()=>{
+ const input=byId('programCsvFile'),msg=byId('programCsvMessage'),file=input?.files?.[0];if(!file){if(msg)msg.textContent='CSVファイルを選択してください。';return;}
+ const mode=byId('programCsvMode')?.value||'append';try{if(msg)msg.textContent='CSVを確認しています…';const text=await readCsvFile(file);const imported=parseProgramCsv(text,mode);if(mode==='replace'&&!confirm(`現在のプログラム ${state.programs.length}件を削除し、CSVの ${imported.length}件に置き換えます。よろしいですか？`)){if(msg)msg.textContent='読み込みをキャンセルしました。';return;}state.programs=mode==='replace'?imported:[...state.programs,...imported];syncReactionGroups(state);persist();renderAdminPrograms();renderPublic();if(msg)msg.textContent=`CSVから ${imported.length}件を${mode==='replace'?'読み込み、現在のプログラムを置き換え':'追加'}ました。Supabaseへ公開する前に内容を確認してください。`;toast('CSVのプログラムを読み込みました');input.value='';}catch(err){if(msg)msg.textContent=String(err.message||err);alert(String(err.message||err));}
+});
+byId('addDemoData')?.addEventListener('click',addDemoPrograms);
  byId('removeDemoData')?.addEventListener('click',removeDemoPrograms);
 }
 function renderBasic(){byId('settingYear').value=state.year;byId('settingDate').value=state.eventDate;byId('settingSlogan').value=state.slogan;byId('reactionDeadline').value=state.reactionDeadline||state.eventDate+'T17:00';byId('internalPasscodeSetting').value=state.internalPasscode||'';
@@ -1139,8 +1178,9 @@ byId('saveNotice').onclick=()=>{
 function stampFixedUrl(i){return `${STAMP_BASE_URL}?stamp=${i}`;}
 function stampQrAsset(i){return new URL(`assets/stamp-qr/stamp-${i}.svg`,location.href).href;}
 function renderStampQrAdmin(){
- const grid=byId('stampQrAdminGrid');if(!grid)return;
- grid.innerHTML=[1,2,3,4,5].map(i=>`<article class="stamp-qr-preview"><div class="stamp-qr-preview-head"><strong>スタンプ${'①②③④⑤'[i-1]}</strong><span>STAMP ${i}</span></div><img src="${stampQrAsset(i)}" alt="スタンプ${i} QRコード"><code>${esc(stampFixedUrl(i))}</code></article>`).join('');
+ const grid=byId('stampQrAdminGrid');if(grid)grid.innerHTML=[1,2,3,4,5].map(i=>`<article class="stamp-qr-preview"><div class="stamp-qr-preview-head"><strong>スタンプ${'①②③④⑤'[i-1]}</strong><span>STAMP ${i}</span></div><img src="${stampQrAsset(i)}" alt="スタンプ${i} QRコード"><code>${esc(stampFixedUrl(i))}</code></article>`).join('');
+ for(let i=1;i<=5;i++){const el=byId(`stampHint${i}`);if(el)el.value=String(state.stampHints?.[i-1]||'');}
+ const preview=byId('stampCompleteAdminPreview');if(preview)preview.innerHTML=state.stampCompleteImage?`<img src="${state.stampCompleteImage}" alt="5個達成時の画像"><span>現在の達成画像</span>`:'<span>達成画像は未設定です。</span>';
 }
 function openStampQrPrint(mode){
  const logo=new URL('assets/ofes-logo.png',location.href).href;
@@ -1178,7 +1218,7 @@ byId('printNotice').onclick=()=>{
  w.document.open();w.document.write(html);w.document.close();
 };
 
-byId('exportJson').onclick=()=>{const blob=new Blob([JSON.stringify({version:17,data:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`OFES_${state.year}_backup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);};
+byId('exportJson').onclick=()=>{const blob=new Blob([JSON.stringify({version:18,data:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`OFES_${state.year}_backup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);};
 byId('importJson').onchange=async e=>{
  const f=e.target.files?.[0];if(!f)return;
  const status=byId('importJsonStatus');
