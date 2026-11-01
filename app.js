@@ -141,7 +141,7 @@ function validData(v){
   const target=['public','internal','both'].includes(String(x.target))?String(x.target):'both';
   const startAt=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(x.startAt||''))?String(x.startAt):'';
   const endAt=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(x.endAt||''))?String(x.endAt):'';
-  return {id:String(x.id||`survey-${i+1}`),title:String(x.title||'アンケート'),message:String(x.message||''),url:String(x.url||''),buttonLabel:String(x.buttonLabel||'回答する'),enabled:x.enabled!==false,target,startAt,endAt,order:Number.isFinite(Number(x.order))?Number(x.order):i+1};
+  return {id:String(x.id||`survey-${i+1}`),title:String(x.title||'アンケート'),message:String(x.message||''),url:String(x.url||''),image:/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/i.test(String(x.image||''))?String(x.image):'',buttonLabel:String(x.buttonLabel||'回答する'),enabled:x.enabled!==false,target,startAt,endAt,order:Number.isFinite(Number(x.order))?Number(x.order):i+1};
  });
  out.nextIds={...clone(DEFAULT_DATA.nextIds),...(v.nextIds||{})};
  out.test={...clone(DEFAULT_DATA.test),...(v.test||{})};
@@ -282,8 +282,11 @@ function visibleSurveys(){
  if(audienceMode==='internal'&&internalSurveyList.length){const merged=new Map(list.map(x=>[x.id,x]));for(const x of internalSurveyList)merged.set(x.id,{...x,target:'internal'});list=[...merged.values()];}
  return list.filter(x=>{if(!surveyIsActive(x))return false;if(audienceMode==='internal')return x.target==='internal'||x.target==='both'||x.target==='public';return x.target==='public'||x.target==='both';}).sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0)||String(a.title).localeCompare(String(b.title),'ja'));
 }
-function renderSurveys(){const panel=byId('surveyPanel'),cards=byId('surveyCards');if(!panel||!cards)return;const list=visibleSurveys();panel.hidden=!list.length;if(!list.length){cards.innerHTML='';return;}const label=byId('surveyAudienceLabel');if(label)label.textContent=audienceMode==='internal'?'大豊学園向けを含む':'来場者向け';cards.innerHTML=list.map(x=>`<article class="survey-card"><div><strong>${esc(x.title)}</strong>${x.message?`<p>${esc(x.message).replace(/\n/g,'<br>')}</p>`:''}${x.endAt?`<small>回答期間：〜 ${esc(x.endAt.replace('T',' '))}</small>`:''}</div><a class="survey-link" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.buttonLabel||'回答する')} ↗</a></article>`).join('');}
+function renderSurveys(){const panel=byId('surveyPanel'),cards=byId('surveyCards');if(!panel||!cards)return;const list=visibleSurveys();panel.hidden=!list.length;if(!list.length){cards.innerHTML='';return;}const label=byId('surveyAudienceLabel');if(label)label.textContent=audienceMode==='internal'?'大豊学園向けを含む':'来場者向け';cards.innerHTML=list.map(x=>`<article class="survey-card"><div><strong>${esc(x.title)}</strong>${x.message?`<p>${esc(x.message).replace(/\n/g,'<br>')}</p>`:''}${x.image?`<button class="survey-poster-button" type="button" data-survey-preview="${esc(x.id)}" aria-label="${esc(x.title)}の参考画像を拡大する"><img src="${esc(x.image)}" alt="${esc(x.title)}の参考ポスター"><span>🔍 ポスターを拡大する</span></button>`:''}${x.endAt?`<small>回答期間：〜 ${esc(x.endAt.replace('T',' '))}</small>`:''}</div><a class="survey-link" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.buttonLabel||'回答する')} ↗</a></article>`).join('');cards.querySelectorAll('[data-survey-preview]').forEach(btn=>btn.addEventListener('click',()=>{const item=list.find(x=>x.id===btn.dataset.surveyPreview);if(!item?.image)return;const modal=byId('surveyImageModal');byId('surveyImageLarge').src=item.image;byId('surveyImageLarge').alt=`${item.title}の参考画像`;modal.hidden=false;}));}
 
+byId('closeSurveyImage')?.addEventListener('click',()=>{byId('surveyImageModal').hidden=true;byId('surveyImageLarge').removeAttribute('src');});
+byId('surveyImageModal')?.addEventListener('click',e=>{if(e.target.id==='surveyImageModal')byId('closeSurveyImage').click();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!byId('surveyImageModal').hidden)byId('closeSurveyImage').click();});
 function renderProgram(){
  const filteredOrdered=orderedPrograms();
  const v=viewTime(),active=activePrograms();
@@ -713,9 +716,12 @@ function showEntryGate(){byId('entryGate').hidden=false;byId('internalLoginForm'
 function hideEntryGate(){byId('entryGate').hidden=true;}
 function choosePublic(){audienceMode='public';internalPresenterMap={};internalSurveyList=[];sessionStorage.setItem(ACCESS_MODE_KEY,'public');hideEntryGate();renderPublic();}
 byId('enterPublic')?.addEventListener('click',choosePublic);
+for(const id of ['internalPasscodeInput','internalPasscodeSetting']){
+ const input=byId(id);input?.addEventListener('input',()=>{const digits=input.value.replace(/[^0-9]/g,'');if(digits!==input.value)input.value=digits;});
+}
 byId('openInternalLogin')?.addEventListener('click',()=>{byId('internalLoginForm').hidden=false;byId('internalPasscodeInput').value='';byId('internalLoginMessage').textContent='';byId('internalPasscodeInput').focus();});
 byId('cancelInternalLogin')?.addEventListener('click',()=>{byId('internalLoginForm').hidden=true;byId('internalLoginMessage').textContent='';});
-byId('internalLoginForm')?.addEventListener('submit',async e=>{e.preventDefault();const pass=byId('internalPasscodeInput').value.trim(),msg=byId('internalLoginMessage');if(!pass)return;msg.textContent='確認しています…';try{if(!window.OFESInternal?.verify)throw Error('Supabase接続準備中です。少し待ってからもう一度お試しください。');const payload=await window.OFESInternal.verify(state.year,pass);if(!payload)throw Error('パスコードが正しくありません。');internalPresenterMap=payload.presenters||{};internalSurveyList=Array.isArray(payload.surveys)?payload.surveys:[];audienceMode='internal';sessionStorage.setItem(ACCESS_MODE_KEY,'internal');hideEntryGate();renderPublic();}catch(err){msg.textContent=err.message||'パスコードを確認できませんでした。';}});
+byId('internalLoginForm')?.addEventListener('submit',async e=>{e.preventDefault();const pass=byId('internalPasscodeInput').value.trim(),msg=byId('internalLoginMessage');if(!/^[0-9]{8,24}$/.test(pass)){msg.textContent='数字8〜24桁のパスコードを入力してください。';return;}msg.textContent='確認しています…';try{if(!window.OFESInternal?.verify)throw Error('Supabase接続準備中です。少し待ってからもう一度お試しください。');const payload=await window.OFESInternal.verify(state.year,pass);if(!payload)throw Error('パスコードが正しくありません。');internalPresenterMap=payload.presenters||{};internalSurveyList=Array.isArray(payload.surveys)?payload.surveys:[];audienceMode='internal';sessionStorage.setItem(ACCESS_MODE_KEY,'internal');hideEntryGate();renderPublic();}catch(err){msg.textContent=err.message||'パスコードを確認できませんでした。';}});
 byId('backToEntry')?.addEventListener('click',()=>{audienceMode='';internalPresenterMap={};internalSurveyList=[];sessionStorage.removeItem(ACCESS_MODE_KEY);showEntryGate();renderAudienceMode();renderSurveys();});
 byId('entryAdmin')?.addEventListener('click',()=>{hideEntryGate();byId('openAdmin').click();});
 
@@ -783,7 +789,7 @@ function renderPreflight(){
  const dateOk=/^\d{4}-\d{2}-\d{2}$/.test(state.eventDate||'')&&String(state.year||'').trim()&&String(state.slogan||'').trim();
  const unassigned=state.programs.filter(p=>!p.zoneId).length;
  const programOk=state.programs.length>0&&unassigned===0;
- const passOk=String(state.internalPasscode||'').trim().length>=8;
+ const passOk=/^[0-9]{8,24}$/.test(String(state.internalPasscode||''));
  const deadline=String(state.reactionDeadline||'');
  const lastEnd=Math.max(0,...state.programs.map(p=>timeNum(programTimes(p).end)));
  const deadlineMinute=deadline.startsWith(state.eventDate+'T')?timeNum(deadline.slice(11,16)):-1;
@@ -803,7 +809,7 @@ function renderPreflight(){
   {ok:dateOk,title:'年度・開催日・スローガン',detail:dateOk?`${state.year}年度／${state.eventDate}`:'未設定の項目があります',tab:'basic'},
   {ok:state.zones.length>0,title:'会場登録',detail:`${state.zones.length}か所（学校全体図 ${campusZones}か所）`,tab:'venues'},
   {ok:programOk,title:'プログラム',detail:programOk?`${state.programs.length}件／会場設定済み`:`${state.programs.length}件／会場未設定 ${unassigned}件`,tab:'program'},
-  {ok:passOk,title:'大豊学園 関係者パスコード',detail:passOk?'8文字以上で設定済み':'8文字以上で設定してください',tab:'basic'},
+  {ok:passOk,title:'大豊学園 関係者パスコード',detail:passOk?'数字8〜24桁で設定済み':'数字8〜24桁で設定してください',tab:'basic'},
   {ok:reactionOk,title:'リアクション受付期限',detail:reactionOk?deadline.replace('T',' '):'最終プログラム後の日時を確認',tab:'basic'},
   {ok:stampOk,title:'スタンプラリー',detail:`${stampOk?'5個達成画像を設定済み':'5個達成画像が未設定'}／ヒント ${(state.stampHints||[]).filter(x=>String(x).trim()).length}/5`,tab:'stampqr'},
   {ok:safetyOk,title:'安全情報',detail:safetyOk?`${state.safetyItems.length}件登録`:'消火器・避難経路等を確認',tab:'venues'},
@@ -1147,7 +1153,7 @@ function renderBasic(){byId('settingYear').value=state.year;byId('settingDate').
  byId('testEnabled').checked=!!state.test.enabled;byId('testDate').value=state.test.date;byId('testTime').value=state.test.time;byId('testSlider').value=timeNum(state.test.time);byId('testTimeText').textContent=state.test.time;}
 byId('saveBasic').onclick=()=>{const year=byId('settingYear').value.trim(),date=byId('settingDate').value;if(!year||!date)return alert('年度と開催日を入力してください');
  const oldDate=state.eventDate;const deadline=byId('reactionDeadline').value;if(!deadline)return alert('リアクションの受付終了日時を入力してください');
- const internalPass=byId('internalPasscodeSetting').value.trim();if(internalPass && internalPass.length<8)return alert('大豊学園関係者用パスコードは8文字以上にしてください。');
+ const internalPass=byId('internalPasscodeSetting').value.trim();if(internalPass && !/^[0-9]{8,24}$/.test(internalPass))return alert('大豊学園関係者用パスコードは数字8〜24桁で設定してください。');
  state.year=year;state.eventDate=date;state.slogan=byId('settingSlogan').value.trim();state.internalPasscode=internalPass;state.reactionDeadline=oldDate!==date&&deadline.startsWith(oldDate+'T')?date+deadline.slice(10):deadline;byId('reactionDeadline').value=state.reactionDeadline;persist();renderPublic();toast('年度設定を保存しました');};
 function updateTest(){state.test.enabled=byId('testEnabled').checked;state.test.date=byId('testDate').value||state.eventDate;state.test.time=byId('testTime').value||'09:25';
  byId('testTimeText').textContent=state.test.time;byId('testSlider').value=timeNum(state.test.time);persist();renderPublic();}
@@ -1160,8 +1166,70 @@ function appPublicUrl(){
  return here.endsWith('/')?here:here.replace(/\/[^/]*$/,'/');
 }
 function surveyTargetLabel(v){return ({both:'一般＋大豊学園',public:'一般来場者',internal:'大豊学園のみ'})[v]||'一般＋大豊学園';}
-function renderSurveyAdmin(){const box=byId('surveyAdminList');if(!box)return;const list=(state.surveys||[]).slice().sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0));box.innerHTML=list.length?list.map((x,i)=>`<article class="editor-card survey-admin-item" data-survey-id="${esc(x.id)}"><div class="survey-admin-head"><div><strong>${esc(x.title||`アンケート${i+1}`)}</strong><span>${esc(surveyTargetLabel(x.target))}</span></div><label class="check"><input type="checkbox" data-survey-field="enabled" ${x.enabled!==false?'checked':''}> 表示する</label></div><div class="survey-form-grid"><label>アンケート名<input data-survey-field="title" value="${esc(x.title)}" maxlength="80"></label><label>対象<select data-survey-field="target"><option value="both" ${x.target==='both'?'selected':''}>一般＋大豊学園</option><option value="public" ${x.target==='public'?'selected':''}>一般来場者のみ</option><option value="internal" ${x.target==='internal'?'selected':''}>大豊学園のみ</option></select></label><label class="survey-span-2">案内文<textarea data-survey-field="message" rows="3" maxlength="500">${esc(x.message)}</textarea></label><label class="survey-span-2">GoogleフォームURL<input data-survey-field="url" type="url" value="${esc(x.url)}" placeholder="https://docs.google.com/forms/..."></label><label>ボタン名<input data-survey-field="buttonLabel" value="${esc(x.buttonLabel||'回答する')}" maxlength="40"></label><label>表示順<input data-survey-field="order" type="number" min="1" max="99" value="${Number(x.order)||i+1}"></label><label>表示開始（任意）<input data-survey-field="startAt" type="datetime-local" value="${esc(x.startAt||'')}"></label><label>表示終了（任意）<input data-survey-field="endAt" type="datetime-local" value="${esc(x.endAt||'')}"></label></div><div class="row-actions"><button type="button" class="btn danger" data-delete-survey="${esc(x.id)}">削除</button></div><p class="caption">${x.target==='internal'?'このURLは一般公開データには含めません。大豊学園関係者用パスコードで入った人だけに表示します。':'来場者画面ではURL文字列ではなく、ボタンとして表示します。'}</p></article>`).join(''):'<div class="editor-card"><p class="muted">アンケートはまだ登録されていません。「＋ アンケートを追加」から必要な数だけ登録してください。</p></div>';box.querySelectorAll('[data-survey-field]').forEach(el=>el.addEventListener('change',e=>{const card=e.target.closest('[data-survey-id]'),item=state.surveys.find(v=>v.id===card?.dataset.surveyId);if(!item)return;const field=e.target.dataset.surveyField;item[field]=field==='enabled'?e.target.checked:field==='order'?Number(e.target.value)||1:e.target.value;if(field==='url'&&item.url&&!/^https:\/\//i.test(item.url)){alert('URLは https:// から始まる形式で入力してください。');item.url='';}persist();renderSurveyAdmin();renderSurveys();toast('アンケート設定を保存しました');}));box.querySelectorAll('[data-delete-survey]').forEach(b=>b.onclick=()=>{const id=b.dataset.deleteSurvey;if(!confirm('このアンケート設定を削除しますか？'))return;state.surveys=state.surveys.filter(x=>x.id!==id);persist();renderSurveyAdmin();renderSurveys();});}
-byId('addSurvey')?.addEventListener('click',()=>{const n=(state.surveys||[]).length+1;state.surveys.push({id:`survey-${Date.now()}`,title:`アンケート${n}`,message:'アンケートへのご協力をお願いします。',url:'',buttonLabel:'回答する',enabled:true,target:'both',startAt:'',endAt:'',order:n});persist();renderSurveyAdmin();toast('アンケートを追加しました');});
+// 画像はSupabase StorageではなくアンケートJSONに圧縮データとして保存する（追加SQL不要）。
+const SURVEY_IMAGE_MAX_BYTES=450000;
+const SURVEY_IMAGES_TOTAL_MAX=2300000;
+async function compressSurveyPoster(file){
+ if(!file || !/^image\/(jpeg|png|webp)$/i.test(file.type))throw Error('JPEG・PNG・WebPの画像を選んでください。');
+ if(file.size>15*1024*1024)throw Error('元画像は15MB以下にしてください。');
+ const url=URL.createObjectURL(file);
+ try{
+  const photo=new Image();photo.src=url;await photo.decode();
+  if(!photo.naturalWidth||!photo.naturalHeight)throw Error('画像を読み取れませんでした。');
+  for(const max of [1700,1500,1300,1100,900]){
+   const scale=Math.min(1,max/Math.max(photo.naturalWidth,photo.naturalHeight));
+   const cvs=document.createElement('canvas');cvs.width=Math.max(1,Math.round(photo.naturalWidth*scale));cvs.height=Math.max(1,Math.round(photo.naturalHeight*scale));
+   const ctx=cvs.getContext('2d',{alpha:false});if(!ctx)throw Error('画像の変換に対応していません。');
+   ctx.fillStyle='#fff';ctx.fillRect(0,0,cvs.width,cvs.height);ctx.drawImage(photo,0,0,cvs.width,cvs.height);
+   for(const quality of [.88,.78,.66]){
+    const data=cvs.toDataURL('image/jpeg',quality);
+    if(data.length*3/4<=SURVEY_IMAGE_MAX_BYTES)return data;
+   }
+  }
+  throw Error('画像を十分に圧縮できませんでした。別の画像をお試しください。');
+ }finally{URL.revokeObjectURL(url);}
+}
+function renderSurveyAdmin(){
+ const box=byId('surveyAdminList');if(!box)return;
+ const list=(state.surveys||[]).slice().sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0));
+ box.innerHTML=list.length?list.map((x,i)=>`<article class="editor-card survey-admin-item" data-survey-id="${esc(x.id)}">
+ <div class="survey-admin-head"><div><strong>${esc(x.title||`アンケート${i+1}`)}</strong><span>${esc(surveyTargetLabel(x.target))}</span></div><label class="check"><input type="checkbox" data-survey-field="enabled" ${x.enabled!==false?'checked':''}> 表示する</label></div>
+ <div class="survey-form-grid">
+ <label>アンケート名<input data-survey-field="title" value="${esc(x.title)}" maxlength="80"></label>
+ <label>対象<select data-survey-field="target"><option value="both" ${x.target==='both'?'selected':''}>一般＋大豊学園</option><option value="public" ${x.target==='public'?'selected':''}>一般来場者のみ</option><option value="internal" ${x.target==='internal'?'selected':''}>大豊学園のみ</option></select></label>
+ <label class="survey-span-2">案内文<textarea data-survey-field="message" rows="3" maxlength="500">${esc(x.message)}</textarea></label>
+ <label class="survey-span-2">GoogleフォームURL<input data-survey-field="url" type="url" value="${esc(x.url)}" placeholder="https://docs.google.com/forms/..."></label>
+ <div class="survey-image-admin"><strong>参考ポスター（任意・1枚）</strong><input type="file" accept="image/jpeg,image/png,image/webp" data-survey-image aria-label="参考ポスター画像を選択"><small>画像は自動縮小して保存。PDFはここでは添付できません。ポスターの画像を指定してください。</small>${x.image?`<img class="survey-image-admin-preview" src="${esc(x.image)}" alt="設定済みの参考ポスター"><button type="button" class="btn light" data-remove-survey-image="${esc(x.id)}">画像を削除する</button>`:'<small>画像は未登録です。</small>'}</div>
+ <label>ボタン名<input data-survey-field="buttonLabel" value="${esc(x.buttonLabel||'回答する')}" maxlength="40"></label>
+ <label>表示順<input data-survey-field="order" type="number" min="1" max="99" value="${Number(x.order)||i+1}"></label>
+ <label>表示開始（任意）<input data-survey-field="startAt" type="datetime-local" value="${esc(x.startAt||'')}"></label>
+ <label>表示終了（任意）<input data-survey-field="endAt" type="datetime-local" value="${esc(x.endAt||'')}"></label></div>
+ <div class="row-actions"><button type="button" class="btn danger" data-delete-survey="${esc(x.id)}">削除</button></div>
+ <p class="caption">${x.target==='internal'?'このURLと参考画像は一般公開データには含めません。大豊学園関係者用パスコードで入った人だけに表示します。':'来場者画面では参考画像を拡大でき、Googleフォームをボタンから開けます。'}</p></article>`).join(''):'<div class="editor-card"><p class="muted">アンケートはまだ登録されていません。「＋ アンケートを追加」から必要な数だけ登録してください。</p></div>';
+ box.querySelectorAll('[data-survey-field]').forEach(el=>el.addEventListener('change',e=>{
+  const card=e.target.closest('[data-survey-id]'),item=state.surveys.find(v=>v.id===card?.dataset.surveyId);if(!item)return;
+  const field=e.target.dataset.surveyField;item[field]=field==='enabled'?e.target.checked:field==='order'?Number(e.target.value)||1:e.target.value;
+  if(field==='url'&&item.url&&!/^https:\/\//i.test(item.url)){alert('URLは https:// から始まる形式で入力してください。');item.url='';}
+  persist();setTimeout(()=>{renderSurveyAdmin();renderSurveys();},0);toast('アンケート設定を保存しました');
+ }));
+ box.querySelectorAll('[data-survey-image]').forEach(input=>input.addEventListener('change',async e=>{
+  const card=e.target.closest('[data-survey-id]'),item=state.surveys.find(v=>v.id===card?.dataset.surveyId),file=e.target.files?.[0];if(!item||!file)return;
+  input.disabled=true;
+  try{
+   const data=await compressSurveyPoster(file);
+   const sum=state.surveys.reduce((n,x)=>n+(x.id===item.id?data.length:(x.image||'').length),0);
+   if(sum>SURVEY_IMAGES_TOTAL_MAX)throw Error('ポスター画像の合計容量が大きすぎます。古い画像の削除や別の軽い画像をご検討ください。');
+   const previous=item.image;item.image=data;
+   if(!persist()){item.image=previous;return;}
+   renderSurveyAdmin();renderSurveys();toast('参考画像を保存しました。公開操作後に来場者へ反映されます');
+  }catch(err){alert(`画像を登録できませんでした：${err.message||err}`);input.disabled=false;input.value='';}
+ }));
+ box.querySelectorAll('[data-remove-survey-image]').forEach(b=>b.onclick=()=>{
+  const item=state.surveys.find(x=>x.id===b.dataset.removeSurveyImage);if(!item)return;item.image='';persist();renderSurveyAdmin();renderSurveys();toast('参考画像を削除しました');
+ });
+ box.querySelectorAll('[data-delete-survey]').forEach(b=>b.onclick=()=>{const id=b.dataset.deleteSurvey;if(!confirm('このアンケート設定を削除しますか？'))return;state.surveys=state.surveys.filter(x=>x.id!==id);persist();renderSurveyAdmin();renderSurveys();});
+}
+byId('addSurvey')?.addEventListener('click',()=>{const n=(state.surveys||[]).length+1;state.surveys.push({id:`survey-${Date.now()}`,title:`アンケート${n}`,message:'アンケートへのご協力をお願いします。',url:'',image:'',buttonLabel:'回答する',enabled:true,target:'both',startAt:'',endAt:'',order:n});persist();renderSurveyAdmin();toast('アンケートを追加しました');});
 
 function renderNotice(){
  byId('noticeTitle').value=state.noticeTitle||DEFAULT_DATA.noticeTitle;
@@ -1184,14 +1252,15 @@ function renderStampQrAdmin(){
 }
 function openStampQrPrint(mode){
  const logo=new URL('assets/ofes-logo.png',location.href).href;
- const cards=[1,2,3,4,5].map(i=>({i,url:stampFixedUrl(i),qr:stampQrAsset(i),circle:'①②③④⑤'[i-1]}));
+ const colors=['#e94253','#1688db','#28a452','#ee9319','#9455c9'];
+ const cards=[1,2,3,4,5].map(i=>({i,qr:stampQrAsset(i),color:colors[i-1]}));
  const w=window.open('','OFES_STAMP_QR_PDF','width=1000,height=1000');
  if(!w){alert('印刷画面を開けませんでした。ポップアップを許可してください。');return;}
  const isPoster=mode==='poster';
- const body=isPoster?cards.map(c=>`<section class="poster-page"><div class="brand"><img src="${logo}" alt="OFES"><div><b>OFES スタンプラリー</b><span>おおフェス</span></div></div><div class="stamp-no">スタンプ ${c.circle}</div><p class="lead">QRコードを読み取って<br><strong>スタンプGET！</strong></p><img class="qr poster-qr" src="${c.qr}" alt="スタンプ${c.i} QRコード"><div class="stamp-label">STAMP ${c.i}</div><div class="url">${esc(c.url)}</div><p class="foot">このQRコードは翌年度以降も同じものを使用できます。</p></section>`).join(''):
- `<section class="sheet-page"><div class="sheet-title"><img src="${logo}" alt="OFES"><div><h1>OFES スタンプラリー QRコード一覧</h1><p>学校用・管理保管用 / 毎年同じQRコードを使用できます。</p></div></div><div class="sheet-grid">${cards.map(c=>`<article class="sheet-card"><div class="sheet-stamp">スタンプ ${c.circle}</div><img class="qr sheet-qr" src="${c.qr}" alt="スタンプ${c.i} QRコード"><b>STAMP ${c.i}</b><div class="url">${esc(c.url)}</div></article>`).join('')}</div><p class="sheet-note">印刷したQRコードを校内5か所に掲示してください。URLは https://otoyoacademy.github.io/Ofes/ に固定されています。</p></section>`;
+ const body=isPoster?cards.map(c=>`<section class="poster-page" style="--stamp-color:${c.color}"><header class="poster-brand"><img src="${logo}" alt="OFES"><div><b>OFES</b><span>STAMP RALLY</span></div></header><h1>スタンプラリー</h1><svg class="number-badge" viewBox="0 0 160 160" role="img" aria-label="スタンプ番号 ${c.i}"><circle cx="80" cy="80" r="79" fill="${c.color}"/><text x="80" y="89" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="122" font-weight="900">${c.i}</text></svg><img class="qr poster-qr" src="${c.qr}" alt="スタンプ${c.i}のQRコード"><p class="scan-tip">カメラでQRコードを読み取って<br>スタンプをGET！</p><footer>OFES · 大豊学園</footer></section>`).join(''):
+ `<section class="sheet-page"><div class="sheet-title"><img src="${logo}" alt="OFES"><div><h1>OFES スタンプラリー</h1><p>QRコード一覧（1〜5）</p></div></div><div class="sheet-grid">${cards.map(c=>`<article class="sheet-card" style="--stamp-color:${c.color}"><svg class="sheet-number" viewBox="0 0 80 80" role="img" aria-label="スタンプ番号 ${c.i}"><circle cx="40" cy="40" r="39" fill="${c.color}"/><text x="40" y="44" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="55" font-weight="900">${c.i}</text></svg><img class="qr sheet-qr" src="${c.qr}" alt="スタンプ${c.i}のQRコード"><strong>STAMP ${c.i}</strong></article>`).join('')}</div><p class="sheet-note">掲示場所の名称は印字していません。5つのQRコードは年度をまたいで使用できます。</p></section>`;
  const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>OFES スタンプラリーQRコード</title><style>
- @page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP","Yu Gothic",Meiryo,sans-serif;color:#172019;background:#fff}.printbar{position:fixed;right:12px;top:12px;z-index:20}.printbar button{font-size:15px;padding:10px 16px;border:1px solid #bbb;border-radius:8px;background:#fff}.poster-page{height:273mm;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center;page-break-after:always;padding:6mm 8mm}.poster-page:last-child{page-break-after:auto}.brand{align-self:flex-start;display:flex;align-items:center;gap:8px;text-align:left}.brand img{width:22mm;height:22mm;object-fit:contain}.brand b{display:block;font-size:15pt}.brand span{font-size:10pt;color:#526058}.stamp-no{margin-top:12mm;font-size:30pt;font-weight:900;color:#197a4b}.lead{font-size:20pt;line-height:1.45;margin:7mm 0 5mm}.lead strong{font-size:28pt}.qr{object-fit:contain;background:#fff}.poster-qr{width:112mm;height:112mm}.stamp-label{font-size:20pt;font-weight:900;letter-spacing:.08em;margin-top:4mm}.url{font-size:8pt;word-break:break-all;color:#59675c;margin-top:3mm}.foot{margin-top:auto;font-size:9pt;color:#526058}.sheet-page{padding:2mm 1mm}.sheet-title{display:flex;align-items:center;gap:10px;border-bottom:2px solid #197a4b;padding-bottom:4mm;margin-bottom:5mm}.sheet-title img{width:20mm;height:20mm;object-fit:contain}.sheet-title h1{font-size:18pt;margin:0}.sheet-title p{margin:1mm 0 0;color:#526058;font-size:9.5pt}.sheet-grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm}.sheet-card{border:1px solid #cfd9d0;border-radius:10px;padding:4mm;text-align:center;min-height:76mm}.sheet-stamp{font-size:15pt;font-weight:850;color:#197a4b}.sheet-qr{width:45mm;height:45mm;display:block;margin:2mm auto}.sheet-card b{display:block;font-size:11pt}.sheet-card .url{font-size:6.5pt}.sheet-note{font-size:8.5pt;color:#526058;margin-top:4mm}@media print{.printbar{display:none}}
+ @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP","Yu Gothic",Meiryo,sans-serif;color:#172019;background:#fff}.printbar{position:fixed;right:12px;top:12px;z-index:20}.printbar button{font-size:15px;padding:10px 16px;border:1px solid #bbb;border-radius:8px;background:#fff}.qr{object-fit:contain;background:#fff;display:block}.poster-page{height:277mm;display:flex;align-items:center;flex-direction:column;text-align:center;page-break-after:always;border:3.5mm solid var(--stamp-color);border-radius:13mm;padding:9mm 9mm 7mm;position:relative}.poster-page:last-child{page-break-after:auto}.poster-brand{display:flex;align-items:center;gap:5mm;align-self:flex-start;text-align:left}.poster-brand img{width:18mm;height:18mm;object-fit:contain}.poster-brand b{font-size:19pt;display:block}.poster-brand span{color:#5d7065;font-size:10pt;letter-spacing:.15em}.poster-page h1{font-size:25pt;margin:3mm 0 5mm}.number-badge{width:48mm;height:48mm;display:block;filter:drop-shadow(0 2mm 4mm #0002)}.poster-qr{width:122mm;height:122mm;margin:5mm auto 0}.scan-tip{font-size:18pt;font-weight:800;line-height:1.5;margin:6mm 0}.poster-page footer{margin-top:auto;font-weight:700;color:#6d7b70;font-size:11pt}.sheet-page{padding:1mm}.sheet-title{display:flex;align-items:center;gap:4mm;border-bottom:2mm solid #d8e2d8;padding-bottom:4mm;margin-bottom:6mm}.sheet-title img{width:20mm;height:20mm;object-fit:contain}.sheet-title h1{font-size:19pt;margin:0}.sheet-title p{font-size:10pt;color:#657267;margin:1mm 0 0}.sheet-grid{display:grid;grid-template-columns:1fr 1fr;gap:4mm}.sheet-card{border:1.2mm solid var(--stamp-color);border-radius:6mm;min-height:72mm;padding:3mm;display:flex;align-items:center;justify-content:center;flex-direction:column;break-inside:avoid}.sheet-number{width:18mm;height:18mm;display:block}.sheet-qr{width:44mm;height:44mm;margin:1mm auto}.sheet-card strong{font-size:9pt;color:#52665a}.sheet-note{font-size:9pt;color:#637269;margin-top:4mm}@media print{.printbar{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.poster-page{break-after:page}.poster-page:last-child{break-after:auto}}
  </style></head><body><div class="printbar"><button onclick="window.print()">印刷／PDFとして保存</button></div>${body}</body></html>`;
  w.document.open();w.document.write(html);w.document.close();
 }
@@ -1213,7 +1282,7 @@ byId('printNotice').onclick=()=>{
  <h1>${esc(state.noticeTitle)}</h1><div class="message">${nl2brText(state.noticeMessage)}</div>
  <div class="main-grid"><div><h2>OFESアプリでできること</h2><ul class="features"><li><strong>プログラム：</strong>発表時間・発表内容・会場を確認できます。</li><li><strong>会場案内：</strong>学校全体図、前期棟、後期棟から会場を確認できます。</li><li><strong>スタンプラリー：</strong>校内5か所のQRコードを読み取って楽しめます。</li><li><strong>リアクション：</strong>発表への感想を5種類のボタンで届けられます。</li></ul><p><strong>今年度のスローガン：</strong>${esc(state.slogan)}</p></div><div class="qrbox"><strong>OFESはこちら</strong><br><img src="${qr}" alt="OFES QRコード"><div class="url">${esc(url)}</div><small>カメラでQRコードを読み取ってください。</small></div></div>
  <h2>スマートフォンのホーム画面に追加する方法</h2><div class="install"><div><strong>iPhone（Safari）</strong><ol><li>QRコードからOFESをSafariで開く</li><li>画面下の「共有」ボタン（□に↑）をタップ</li><li>「ホーム画面に追加」を選ぶ</li><li>「追加」をタップ</li></ol></div><div><strong>Android（Chrome）</strong><ol><li>QRコードからOFESをChromeで開く</li><li>右上の「︙」メニューをタップ</li><li>「ホーム画面に追加」または「アプリをインストール」を選ぶ</li><li>画面の案内に従って追加する</li></ol></div></div>
- ${state.internalPasscode?`<div class="message"><strong>大豊学園関係者用パスコード：</strong> <span style="font-size:16pt;font-weight:800;letter-spacing:.08em">${esc(state.internalPasscode)}</span><br><small>児童生徒・保護者・学校関係者は、最初の画面で「大豊学園」を選び、このパスコードを入力してください。</small></div>`:''}<div class="note">※ OFESはWebアプリです。一般来場者は「一般来場者」から利用できます。児童生徒名は一般来場者には表示されません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div><div class="issuer">${esc(state.noticeIssuer)}</div>
+ ${state.internalPasscode?`<div class="message"><strong>大豊学園関係者用パスコード：</strong> <span style="font-size:16pt;font-weight:800;letter-spacing:.08em">${esc(state.internalPasscode)}</span><br><small>児童生徒・保護者・学校関係者は、最初の画面で「大豊学園関係者」を選び、このパスコードを入力してください。</small></div>`:''}<div class="note">※ OFESはWebアプリです。一般来場者は「一般来場者」から利用できます。児童生徒名は一般来場者には表示されません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div><div class="issuer">${esc(state.noticeIssuer)}</div>
  </body></html>`;
  w.document.open();w.document.write(html);w.document.close();
 };
