@@ -956,6 +956,66 @@ function parseCsvRows(text){
 function normalizeCsvSession(v){const x=String(v||'').trim().replace(/^セッション/,'');const m={'①':'s1','1':'s1','s1':'s1','②':'s2','2':'s2','s2':'s2','③':'s3','3':'s3','s3':'s3','④':'s4','4':'s4','s4':'s4'};return m[x]||'';}
 function csvTimeValid(v){return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v||'').trim());}
 async function readCsvFile(file){const buf=await file.arrayBuffer();let text=new TextDecoder('utf-8').decode(buf);if(text.includes('�')){try{const sjis=new TextDecoder('shift_jis').decode(buf);if((sjis.match(/�/g)||[]).length<(text.match(/�/g)||[]).length)text=sjis;}catch{}}return text;}
+// Ver.1.37: OFES専用Excelの「プログラム入力」タブを直接読み込む。
+// Excelのプルダウンと説明タブはそのまま維持し、CSVへの保存操作を不要にする。
+async function readProgramExcel(file){
+ if(typeof JSZip==='undefined')throw Error('Excel読込ライブラリが読み込まれていません。ページを再読み込みしてください。');
+ if(file.size>8*1024*1024)throw Error('Excelファイルのサイズは8MB以下にしてください。');
+ let zip;
+ try{zip=await JSZip.loadAsync(await file.arrayBuffer());}catch{throw Error('Excelファイルを開けませんでした。OFESのExcel入力様式（.xlsx）を使用してください。');}
+ const ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+ async function loadXml(path,limit){
+  const ent=zip.file(path);if(!ent)throw Error(`Excel内の必要なデータが見つかりません（${path}）。`);
+  const text=await ent.async('string');if(text.length>limit)throw Error('Excelのデータ量が多すぎます（最大300件程度）。');
+  const xml=new DOMParser().parseFromString(text,'application/xml');
+  if(xml.getElementsByTagName('parsererror').length)throw Error('Excelの内部形式を読み取れませんでした。');
+  return xml;
+ }
+ // 本アプリの専用テンプレートは先頭シートにプログラム入力を格納する。
+ const wb=await loadXml('xl/workbook.xml',1000000);
+ const first=wb.getElementsByTagNameNS(ns,'sheet')[0];
+ if(first?.getAttribute('name')!=='プログラム入力')throw Error('「プログラム入力」が先頭タブのOFES専用Excel様式を使用してください。');
+ const doc=await loadXml('xl/worksheets/sheet1.xml',3000000);
+ let shared=[];
+ if(zip.file('xl/sharedStrings.xml')){
+  const sharedDoc=await loadXml('xl/sharedStrings.xml',1500000);
+  shared=[...sharedDoc.getElementsByTagNameNS(ns,'si')].map(si=>[...si.getElementsByTagNameNS(ns,'t')].map(t=>t.textContent||'').join(''));
+ }
+ const data=doc.getElementsByTagNameNS(ns,'sheetData')[0];
+ if(!data)throw Error('「プログラム入力」タブの入力欄が見つかりません。');
+ const out=[];
+ for(const row of [...data.getElementsByTagNameNS(ns,'row')]){
+  const rowNumber=Number(row.getAttribute('r'))||0;
+  if(rowNumber<1||rowNumber>301)continue;
+  const fields=Array(9).fill('');
+  for(const cell of [...row.getElementsByTagNameNS(ns,'c')]){
+   const address=cell.getAttribute('r')||'';
+   const match=/^([A-Z]+)\d+$/.exec(address);if(!match)continue;
+   const colIndex=[...match[1]].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0)-1;
+   if(colIndex<0||colIndex>=9)continue;
+   const type=cell.getAttribute('t')||'';
+   const raw=cell.getElementsByTagNameNS(ns,'v')[0]?.textContent||'';
+   let val=type==='s'?shared[Number(raw)]||'':type==='inlineStr'?
+     [...cell.getElementsByTagNameNS(ns,'t')].map(x=>x.textContent||'').join(''):raw;
+   if((colIndex===2||colIndex===3)&&val!==''&&/^\d*\.\d+$/.test(val)){
+    // Excelが時刻を1日の小数値で保存した場合は HH:MM に戻す。
+    const minutes=Math.round((Number(val)%1)*1440)%1440;
+    val=`${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}`;
+   }
+   fields[colIndex]=String(val||'').trim();
+  }
+  if(rowNumber===1||fields.some(x=>x!==''))out.push(fields);
+ }
+ if(!out.length||out[0][0]!=='種別')throw Error('入力タブの見出しが見つかりません。OFES専用のExcel様式をお使いください。');
+ if(out.length<2)throw Error('Excelにプログラムが入力されていません。');
+ return out.map(fields=>fields.map(value=>`"${String(value).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+}
+async function readProgramImportFile(file){
+ const name=String(file.name||'').toLowerCase();
+ if(name.endsWith('.xlsx'))return readProgramExcel(file);
+ if(name.endsWith('.csv'))return readCsvFile(file);
+ throw Error('Excel（.xlsx）またはCSV（.csv）ファイルを選んでください。');
+}
 // Ver.1.36: 会場名を選ぶExcel入力用の表示名を生成する。
 // 同名会場だけ図面名を付け、同一図面にも同名がある場合は番号で区別する。
 function programVenueChoices(){
@@ -1062,7 +1122,7 @@ function parseProgramCsv(text,mode){
   }
   else errors.push(`${line}行目：種別は「セッション」「午前」「午後」「その他」のいずれかを入力してください。`);
  }
- if(errors.length)throw Error(`CSVに修正が必要な箇所があります。\n${errors.slice(0,12).join('\n')}${errors.length>12?`\nほか ${errors.length-12}件`:''}`);
+ if(errors.length)throw Error(`入力データに修正が必要な箇所があります。\n${errors.slice(0,12).join('\n')}${errors.length>12?`\nほか ${errors.length-12}件`:''}`);
  if(!out.length)throw Error('読み込めるプログラムがありません。');return out;
 }
 
@@ -1239,8 +1299,8 @@ function bindAdminProgramEvents(){
  byId('addAfternoonProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'afternoon',start:'13:00',end:'13:20',grade:'',group:'',title:'新しい午後プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('午後プログラムを追加しました')});
  byId('addOtherProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'other',start:'08:30',end:'08:50',grade:'',group:'',title:'新しい全体プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('全体プログラムを追加しました')});
  byId('importProgramCsv')?.addEventListener('click',async()=>{
- const input=byId('programCsvFile'),msg=byId('programCsvMessage'),file=input?.files?.[0];if(!file){if(msg)msg.textContent='CSVファイルを選択してください。';return;}
- const mode=byId('programCsvMode')?.value||'append';try{if(msg)msg.textContent='CSVを確認しています…';const text=await readCsvFile(file);const imported=parseProgramCsv(text,mode);if(mode==='replace'&&!confirm(`現在のプログラム ${state.programs.length}件を削除し、CSVの ${imported.length}件に置き換えます。よろしいですか？`)){if(msg)msg.textContent='読み込みをキャンセルしました。';return;}state.programs=mode==='replace'?imported:[...state.programs,...imported];syncReactionGroups(state);persist();renderAdminPrograms();renderPublic();if(msg)msg.textContent=`CSVから ${imported.length}件を${mode==='replace'?'読み込み、現在のプログラムを置き換え':'追加'}ました。Supabaseへ公開する前に内容を確認してください。`;toast('CSVのプログラムを読み込みました');input.value='';}catch(err){if(msg)msg.textContent=String(err.message||err);alert(String(err.message||err));}
+ const input=byId('programCsvFile'),msg=byId('programCsvMessage'),file=input?.files?.[0];if(!file){if(msg)msg.textContent='ExcelまたはCSVファイルを選んでください。';return;}
+ const mode=byId('programCsvMode')?.value||'append';try{if(msg)msg.textContent='Excel／CSVを確認しています…';const text=await readProgramImportFile(file);const imported=parseProgramCsv(text,mode);if(mode==='replace'&&!confirm(`現在のプログラム ${state.programs.length}件を削除し、ファイルの ${imported.length}件に置き換えます。よろしいですか？`)){if(msg)msg.textContent='読み込みをキャンセルしました。';return;}state.programs=mode==='replace'?imported:[...state.programs,...imported];syncReactionGroups(state);persist();renderAdminPrograms();renderPublic();if(msg)msg.textContent=`Excel／CSVから ${imported.length}件を${mode==='replace'?'読み込み、現在のプログラムを置き換え':'追加'}ました。Supabaseへ公開する前に内容を確認してください。`;toast('プログラムを読み込みました');input.value='';}catch(err){if(msg)msg.textContent=String(err.message||err);alert(String(err.message||err));}
 });
 byId('addDemoData')?.addEventListener('click',addDemoPrograms);
  byId('removeDemoData')?.addEventListener('click',removeDemoPrograms);
