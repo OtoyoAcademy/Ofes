@@ -238,3 +238,13 @@
 .survey-image-modal-inner{position:relative;display:grid;justify-items:center;gap:10px;max-height:100%;max-width:100%}
 .survey-image-modal img{display:block;max-width:96vw;max-height:83dvh;object-fit:contain;background:#fff}
 .survey-image-close{justify-self:end;background:#fff;border:0;border-radius:9px;padding:10px 15px;font-weight:700;cursor:pointer}
+
+/* Ver.1.40: clear multi-select controls for program deletion */
+.program-bulk-card{max-width:980px;border-color:#f0c3bc;background:#fffdfb}
+.program-bulk-card h3{color:#922f27}
+.program-selection-count{align-self:center;font-size:13px;color:#41564a;padding:7px 2px}
+.program-bulk-card button:disabled{opacity:.47;cursor:not-allowed}
+.venue-program-admin-row,.admin-program-row.whole-program-row{position:relative;padding-top:46px}
+.program-select-control{position:absolute;top:9px;right:12px;display:flex;gap:7px;align-items:center;flex-direction:row;font-size:12px;font-weight:800;color:#9f3529;background:#fff7f5;border:1px solid #f1cbc5;border-radius:8px;padding:4px 9px;cursor:pointer;z-index:1}
+.program-select-control input{width:17px;height:17px;min-width:17px;margin:0;accent-color:#aa4335}
+@media(max-width:700px){.program-bulk-card .row-actions{gap:8px}.program-bulk-card button{width:100%}}
