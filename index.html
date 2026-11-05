@@ -11,13 +11,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="OFES">
-  <link rel="stylesheet" href="style.css?v=138">
+  <link rel="stylesheet" href="style.css?v=139">
   <script defer src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="assets/vendor/jszip.min.js"></script>
-  <script defer src="app.js?v=138"></script>
-  <script defer src="photo-collage.js?v=138"></script>
+  <script defer src="app.js?v=139"></script>
+  <script defer src="photo-collage.js?v=139"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script type="module" src="supabase-bridge.js?v=138"></script>
+  <script type="module" src="supabase-bridge.js?v=139"></script>
 </head>
 <body>
 <div id="entryGate" class="entry-gate" hidden>
@@ -240,7 +240,8 @@
     <div class="editor-card program-csv-card">
       <h3>Excelでプログラムを一括入力</h3>
       <p class="muted"><strong>Excel形式（.xlsx）が新しい入力様式です。</strong>「プログラム入力」「入力説明」「選択肢設定」の3タブがあります。<strong>ダウンロード時点で「会場・配置図」に登録済みの会場名を選択肢へ自動反映</strong>します。入力タブでは<strong>会場IDではなく場所名</strong>をプルダウンで選べます。セッション①〜④を選ぶと、<strong>その時点で設定されている開始・終了時刻がC・D列へ自動表示</strong>されます。発表学年には「保育所」「実行委員」を追加しました。セッション以外の時刻はJ・K列に入力してください。<strong>入力後はExcelのまま読み込めるため、CSV保存は不要です。</strong></p>
-      <div class="row-actions"><a id="downloadProgramXlsx" class="btn primary" href="assets/templates/OFES_プログラム入力テンプレート_時間自動反映.xlsx" download="OFES_プログラム入力テンプレート_時間自動反映.xlsx">【更新版】会場名・セッション時間入りExcelをダウンロード（.xlsx）</a></div>
+      <div class="row-actions"><button type="button" id="downloadProgramXlsx" class="btn primary">会場名・セッション時間入りExcelをダウンロード（.xlsx）</button></div>
+      <p class="caption">Excel入力様式はアプリに組み込まれているため、テンプレートファイルの公開先に依存しません。</p>
       <p class="caption"><strong>操作手順：</strong>①「会場・配置図」で会場を登録・保存 → ②上のボタンでExcel（.xlsx）をダウンロード → ③会場名・セッションを選択して時間を自動表示（午前・午後・その他はJ・K列へ時間入力） → ④Excelのまま保存 → ⑤下からExcelファイルを選んで読み込む。<strong>既存会場名を変更したときは再ダウンロードしてください。</strong> Excel／CSV取込時に場所名を会場IDへ変換します。従来のCSVファイルも引き続き読み込めます。</p>
       <label>入力済みExcel／CSVを選ぶ<input type="file" id="programCsvFile" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"></label>
       <label>読み込み方法<select id="programCsvMode"><option value="append">現在のプログラムに追加する</option><option value="replace">現在のプログラムをすべて置き換える</option></select></label>
