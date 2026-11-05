@@ -956,7 +956,7 @@ function parseCsvRows(text){
 function normalizeCsvSession(v){const x=String(v||'').trim().replace(/^セッション/,'');const m={'①':'s1','1':'s1','s1':'s1','②':'s2','2':'s2','s2':'s2','③':'s3','3':'s3','s3':'s3','④':'s4','4':'s4','s4':'s4'};return m[x]||'';}
 function csvTimeValid(v){return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v||'').trim());}
 async function readCsvFile(file){const buf=await file.arrayBuffer();let text=new TextDecoder('utf-8').decode(buf);if(text.includes('�')){try{const sjis=new TextDecoder('shift_jis').decode(buf);if((sjis.match(/�/g)||[]).length<(text.match(/�/g)||[]).length)text=sjis;}catch{}}return text;}
-// Ver.1.37: OFES専用Excelの「プログラム入力」タブを直接読み込む。
+// Ver.1.38: OFES専用Excelの「プログラム入力」タブを直接読み込む。
 // Excelのプルダウンと説明タブはそのまま維持し、CSVへの保存操作を不要にする。
 async function readProgramExcel(file){
  if(typeof JSZip==='undefined')throw Error('Excel読込ライブラリが読み込まれていません。ページを再読み込みしてください。');
@@ -987,28 +987,35 @@ async function readProgramExcel(file){
  for(const row of [...data.getElementsByTagNameNS(ns,'row')]){
   const rowNumber=Number(row.getAttribute('r'))||0;
   if(rowNumber<1||rowNumber>301)continue;
-  const fields=Array(9).fill('');
+  const fields=Array(11).fill('');
   for(const cell of [...row.getElementsByTagNameNS(ns,'c')]){
    const address=cell.getAttribute('r')||'';
    const match=/^([A-Z]+)\d+$/.exec(address);if(!match)continue;
    const colIndex=[...match[1]].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0)-1;
-   if(colIndex<0||colIndex>=9)continue;
+   // Ver.1.38: J/K are optional manually entered times for non-session items.
+   if(colIndex<0||colIndex>=11)continue;
    const type=cell.getAttribute('t')||'';
    const raw=cell.getElementsByTagNameNS(ns,'v')[0]?.textContent||'';
    let val=type==='s'?shared[Number(raw)]||'':type==='inlineStr'?
      [...cell.getElementsByTagNameNS(ns,'t')].map(x=>x.textContent||'').join(''):raw;
-   if((colIndex===2||colIndex===3)&&val!==''&&/^\d*\.\d+$/.test(val)){
+   if((colIndex===2||colIndex===3||colIndex===9||colIndex===10)&&val!==''&&/^\d*\.\d+$/.test(val)){
     // Excelが時刻を1日の小数値で保存した場合は HH:MM に戻す。
     const minutes=Math.round((Number(val)%1)*1440)%1440;
     val=`${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}`;
    }
    fields[colIndex]=String(val||'').trim();
   }
+  if(rowNumber!==1 && ['午前','午後','その他'].includes(fields[0])){
+   // Use the explicitly typed J/K values even when Excel has no formula result cache.
+   // Old template remains compatible: if J/K are empty, retain C/D.
+   if(fields[9])fields[2]=fields[9];
+   if(fields[10])fields[3]=fields[10];
+  }
   if(rowNumber===1||fields.some(x=>x!==''))out.push(fields);
  }
  if(!out.length||out[0][0]!=='種別')throw Error('入力タブの見出しが見つかりません。OFES専用のExcel様式をお使いください。');
  if(out.length<2)throw Error('Excelにプログラムが入力されていません。');
- return out.map(fields=>fields.map(value=>`"${String(value).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+ return out.map(fields=>fields.slice(0,9).map(value=>`"${String(value).replace(/"/g,'""')}"`).join(',')).join('\r\n');
 }
 async function readProgramImportFile(file){
  const name=String(file.name||'').toLowerCase();
@@ -1050,7 +1057,7 @@ async function downloadProgramExcel(event){
  btn.setAttribute('aria-disabled','true');btn.style.pointerEvents='none';btn.textContent='会場名を反映しています…';
  try{
   if(typeof JSZip==='undefined')throw Error('Excel編集ライブラリを読み込めませんでした。ページを再読み込みしてお試しください。');
-  const res=await fetch('assets/templates/OFES_プログラム入力テンプレート_会場名自動設定.xlsx',{cache:'no-store'});
+  const res=await fetch('assets/templates/OFES_プログラム入力テンプレート_時間自動反映.xlsx',{cache:'no-store'});
   if(!res.ok)throw Error(`Excel様式の取得に失敗しました（HTTP ${res.status}）。`);
   const zip=await JSZip.loadAsync(await res.arrayBuffer());
   const sheetPath='xl/worksheets/sheet3.xml';
@@ -1075,12 +1082,20 @@ async function downloadProgramExcel(event){
    setText(i+4,'C',choices[i].label); // ExcelではIDではなく会場名を選ぶ
    setText(i+4,'E',choices[i].id); // 確認用のID（CSVには含まれない）
   }
+  // Ver.1.38: Copy the current 4 session windows from management settings.
+  // Excel's C/D formulas look these up when the user chooses a session number.
+  SESSION_IDS.forEach((sid,i)=>{
+   const schedule=sessionDef(sid);
+   setText(i+4,'G',['①','②','③','④'][i]);
+   setText(i+4,'H',schedule.start);
+   setText(i+4,'I',schedule.end);
+  });
   zip.file(sheetPath,new XMLSerializer().serializeToString(xml));
   const blob=new Blob([await zip.generateAsync({type:'uint8array',compression:'DEFLATE',compressionOptions:{level:6}})],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const url=URL.createObjectURL(blob),a=document.createElement('a');
   a.href=url;a.download=`OFES_${state.year}年度_プログラム入力_会場名選択.xlsx`;document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),3000);
-  toast(`登録済み会場 ${choices.length}件をExcelの選択肢に反映しました`);
+  toast(`登録済み会場 ${choices.length}件とセッション時間をExcelへ反映しました`);
  }catch(err){console.error(err);alert(`Excel入力様式を作成できませんでした。${err.message||err}`);}
  finally{btn.removeAttribute('aria-disabled');btn.style.pointerEvents='';btn.textContent=old;}
 }
