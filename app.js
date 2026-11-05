@@ -956,21 +956,116 @@ function parseCsvRows(text){
 function normalizeCsvSession(v){const x=String(v||'').trim().replace(/^セッション/,'');const m={'①':'s1','1':'s1','s1':'s1','②':'s2','2':'s2','s2':'s2','③':'s3','3':'s3','s3':'s3','④':'s4','4':'s4','s4':'s4'};return m[x]||'';}
 function csvTimeValid(v){return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v||'').trim());}
 async function readCsvFile(file){const buf=await file.arrayBuffer();let text=new TextDecoder('utf-8').decode(buf);if(text.includes('�')){try{const sjis=new TextDecoder('shift_jis').decode(buf);if((sjis.match(/�/g)||[]).length<(text.match(/�/g)||[]).length)text=sjis;}catch{}}return text;}
+// Ver.1.36: 会場名を選ぶExcel入力用の表示名を生成する。
+// 同名会場だけ図面名を付け、同一図面にも同名がある場合は番号で区別する。
+function programVenueChoices(){
+ const zones=state.zones.filter(z=>z&&z.id&&String(z.name||'').trim())
+  .slice().sort((a,b)=>String(a.name).localeCompare(String(b.name),'ja')||String(a.id).localeCompare(String(b.id),'ja'));
+ const names=new Map();zones.forEach(z=>{const n=String(z.name).trim();names.set(n,(names.get(n)||0)+1)});
+ const used=new Map();
+ return zones.map(z=>{
+  const name=String(z.name).trim(),map=MAPS.find(m=>m.id===z.mapId)?.name||'配置図未設定';
+  const base=names.get(name)>1?`${name}（${map}）`:name;
+  const order=(used.get(base)||0)+1;used.set(base,order);
+  return {id:z.id,name,label:order===1?base:`${base}・${order}`};
+ });
+}
+function resolveCsvVenue(raw){
+ const val=String(raw||'').trim();if(!val)return {id:''};
+ const byId=state.zones.find(z=>z.id===val);if(byId)return {id:byId.id}; // 旧CSV互換
+ const choices=programVenueChoices();
+ const option=choices.find(z=>z.label===val);if(option)return {id:option.id};
+ const named=choices.filter(z=>z.name===val);
+ if(named.length===1)return {id:named[0].id};
+ if(named.length>1)return {error:`会場名「${val}」が複数あります。Excelを再ダウンロードして、図面名付きの候補を選択してください。`};
+ return {error:`会場「${val}」が登録されていません。会場・配置図を確認し、必要に応じてExcelを再ダウンロードしてください。`};
+}
+// ブラウザ内でXLSXを編集し、ダウンロード時点の下書きの会場名をプルダウン候補へ埋め込む。
+async function downloadProgramExcel(event){
+ event.preventDefault();
+ const choices=programVenueChoices();
+ if(!choices.length){alert('登録済み会場がありません。先に「会場・配置図」で会場を登録・保存してください。');return;}
+ if(choices.length>300){alert('会場は300件まで自動反映できます。件数を確認してください。');return;}
+ const btn=byId('downloadProgramXlsx');const old=btn.textContent;
+ btn.setAttribute('aria-disabled','true');btn.style.pointerEvents='none';btn.textContent='会場名を反映しています…';
+ try{
+  if(typeof JSZip==='undefined')throw Error('Excel編集ライブラリを読み込めませんでした。ページを再読み込みしてお試しください。');
+  const res=await fetch('assets/templates/OFES_プログラム入力テンプレート_会場名自動設定.xlsx',{cache:'no-store'});
+  if(!res.ok)throw Error(`Excel様式の取得に失敗しました（HTTP ${res.status}）。`);
+  const zip=await JSZip.loadAsync(await res.arrayBuffer());
+  const sheetPath='xl/worksheets/sheet3.xml';
+  const sheetFile=zip.file(sheetPath);if(!sheetFile)throw Error('Excel様式の選択肢設定タブが見つかりません。');
+  const sheetText=await sheetFile.async('string');
+  const xml=new DOMParser().parseFromString(sheetText,'application/xml');
+  if(xml.getElementsByTagName('parsererror').length)throw Error('Excel様式の解析に失敗しました。');
+  const ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  const sheetData=xml.getElementsByTagNameNS(ns,'sheetData')[0];
+  if(!sheetData)throw Error('Excelの入力欄が見つかりません。');
+  const rows=new Map([...sheetData.getElementsByTagNameNS(ns,'row')].map(el=>[Number(el.getAttribute('r')),el]));
+  function setText(rowNumber,col,value){
+   const row=rows.get(rowNumber);if(!row)throw Error(`Excel様式に${rowNumber}行目がありません。`);
+   const addr=`${col}${rowNumber}`;
+   let cell=[...row.getElementsByTagNameNS(ns,'c')].find(x=>x.getAttribute('r')===addr);
+   if(!cell){cell=xml.createElementNS(ns,'x:c');cell.setAttribute('r',addr);row.appendChild(cell);}
+   while(cell.firstChild)cell.removeChild(cell.firstChild);
+   cell.setAttribute('t','inlineStr');
+   const inline=xml.createElementNS(ns,'x:is');const t=xml.createElementNS(ns,'x:t');t.textContent=value;inline.appendChild(t);cell.appendChild(inline);
+  }
+  for(let i=0;i<choices.length;i++){
+   setText(i+4,'C',choices[i].label); // ExcelではIDではなく会場名を選ぶ
+   setText(i+4,'E',choices[i].id); // 確認用のID（CSVには含まれない）
+  }
+  zip.file(sheetPath,new XMLSerializer().serializeToString(xml));
+  const blob=new Blob([await zip.generateAsync({type:'uint8array',compression:'DEFLATE',compressionOptions:{level:6}})],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=`OFES_${state.year}年度_プログラム入力_会場名選択.xlsx`;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),3000);
+  toast(`登録済み会場 ${choices.length}件をExcelの選択肢に反映しました`);
+ }catch(err){console.error(err);alert(`Excel入力様式を作成できませんでした。${err.message||err}`);}
+ finally{btn.removeAttribute('aria-disabled');btn.style.pointerEvents='';btn.textContent=old;}
+}
 function parseProgramCsv(text,mode){
- const rows=parseCsvRows(text);const headerAt=rows.findIndex(r=>String(r[0]||'').trim()==='種別');if(headerAt<0)throw Error('「種別」から始まる見出し行が見つかりません。OFESのCSV様式を使用してください。');
- const headers=rows[headerAt].map(x=>String(x||'').trim());const need=['種別','セッション','開始時刻','終了時刻','会場ID','発表学年','発表グループ','発表内容','児童生徒名（大豊学園のみ）'];
- for(const h of need)if(!headers.includes(h))throw Error(`必要な列「${h}」がありません。`);
- const idx=Object.fromEntries(headers.map((h,i)=>[h,i])),out=[],errors=[];const existing=mode==='append'?[...state.programs]:[];const seen=new Set(existing.filter(p=>SESSION_IDS.includes(p.session)&&p.zoneId).map(p=>`${p.zoneId}|${p.session}`));
+ const rows=parseCsvRows(text);const headerAt=rows.findIndex(r=>String(r[0]||'').trim()==='種別');
+ if(headerAt<0)throw Error('「種別」から始まる見出し行が見つかりません。OFESのCSV様式を使用してください。');
+ const headers=rows[headerAt].map(x=>String(x||'').trim());
+ const required=['種別','セッション','開始時刻','終了時刻','発表学年','発表グループ','発表内容','児童生徒名（大豊学園のみ）'];
+ for(const h of required)if(!headers.includes(h))throw Error(`必要な列「${h}」がありません。`);
+ const venueCol=headers.includes('会場名')?'会場名':headers.includes('会場ID')?'会場ID':null;
+ if(!venueCol)throw Error('必要な列「会場名」または「会場ID」がありません。');
+ const idx=Object.fromEntries(headers.map((h,i)=>[h,i])),out=[],errors=[];
+ const existing=mode==='append'?[...state.programs]:[];
+ const seen=new Set(existing.filter(p=>SESSION_IDS.includes(p.session)&&p.zoneId).map(p=>`${p.zoneId}|${p.session}`));
  for(let ri=headerAt+1;ri<rows.length;ri++){
   const r=rows[ri],first=String(r[0]||'').trim();if(!r.some(x=>String(x||'').trim())||first.startsWith('#'))continue;
-  const type=String(r[idx['種別']]||'').trim(),sessionRaw=String(r[idx['セッション']]||'').trim(),start=String(r[idx['開始時刻']]||'').trim(),end=String(r[idx['終了時刻']]||'').trim(),zoneId=String(r[idx['会場ID']]||'').trim(),grade=String(r[idx['発表学年']]||'').trim(),group=String(r[idx['発表グループ']]||'').trim(),title=String(r[idx['発表内容']]||'').trim(),presenters=String(r[idx['児童生徒名（大豊学園のみ）']]||'').trim();
+  const type=String(r[idx['種別']]||'').trim(),sessionRaw=String(r[idx['セッション']]||'').trim(),start=String(r[idx['開始時刻']]||'').trim(),end=String(r[idx['終了時刻']]||'').trim();
+  const rawVenue=String(r[idx[venueCol]]||'').trim(),grade=String(r[idx['発表学年']]||'').trim(),group=String(r[idx['発表グループ']]||'').trim(),title=String(r[idx['発表内容']]||'').trim(),presenters=String(r[idx['児童生徒名（大豊学園のみ）']]||'').trim();
   const line=ri+1;if(!title){errors.push(`${line}行目：発表内容が空欄です。`);continue;}
-  let session='';if(type==='セッション'){session=normalizeCsvSession(sessionRaw);if(!session){errors.push(`${line}行目：セッションは①〜④を入力してください。`);continue;}if(!zoneId||!state.zones.some(z=>z.id===zoneId)){errors.push(`${line}行目：会場ID「${zoneId||'（空欄）'}」が登録されていません。`);continue;}const key=`${zoneId}|${session}`;if(seen.has(key)){errors.push(`${line}行目：${zoneId} の ${sessionLabel(session)} はすでに登録されています。`);continue;}seen.add(key);const d=sessionDef(session);out.push({id:`p${Date.now()}-${ri}`,reactionId:'',session,start:d.start,end:d.end,grade,group,title,zoneId,presenters});}
-  else if(type==='午後'||type==='その他'){session=type==='午後'?'afternoon':'other';if(!csvTimeValid(start)||!csvTimeValid(end)){errors.push(`${line}行目：開始時刻・終了時刻を HH:MM で入力してください。`);continue;}if(timeNum(end)<=timeNum(start)){errors.push(`${line}行目：終了時刻は開始時刻より後にしてください。`);continue;}if(zoneId&&!state.zones.some(z=>z.id===zoneId)){errors.push(`${line}行目：会場ID「${zoneId}」が登録されていません。`);continue;}out.push({id:`p${Date.now()}-${ri}`,reactionId:'',session,start,end,grade,group,title,zoneId,presenters});}
-  else errors.push(`${line}行目：種別は「セッション」「午後」「その他」のいずれかを入力してください。`);
+  const resolved=resolveCsvVenue(rawVenue);
+  if(resolved.error){errors.push(`${line}行目：${resolved.error}`);continue;}
+  const zoneId=resolved.id;
+  let session='';
+  if(type==='セッション'){
+   session=normalizeCsvSession(sessionRaw);
+   if(!session){errors.push(`${line}行目：セッションは①〜④を入力してください。`);continue;}
+   if(!zoneId){errors.push(`${line}行目：セッションの会場名が空欄です。`);continue;}
+   const key=`${zoneId}|${session}`;
+   if(seen.has(key)){errors.push(`${line}行目：${rawVenue} の ${sessionLabel(session)} はすでに登録されています。`);continue;}
+   seen.add(key);const d=sessionDef(session);
+   out.push({id:`p${Date.now()}-${ri}`,reactionId:'',session,start:d.start,end:d.end,grade,group,title,zoneId,presenters});
+  }
+  else if(type==='午前'||type==='午後'||type==='その他'){
+   // 午前は「セッション以外の午前行事」として、従来のその他と同じ時刻順で扱う。
+   session=type==='午後'?'afternoon':'other';
+   if(!csvTimeValid(start)||!csvTimeValid(end)){errors.push(`${line}行目：開始時刻・終了時刻を HH:MM で入力してください。`);continue;}
+   if(timeNum(end)<=timeNum(start)){errors.push(`${line}行目：終了時刻は開始時刻より後にしてください。`);continue;}
+   out.push({id:`p${Date.now()}-${ri}`,reactionId:'',session,start,end,grade,group,title,zoneId,presenters});
+  }
+  else errors.push(`${line}行目：種別は「セッション」「午前」「午後」「その他」のいずれかを入力してください。`);
  }
- if(errors.length)throw Error(`CSVに修正が必要な箇所があります。\n${errors.slice(0,12).join('\n')}${errors.length>12?`\nほか ${errors.length-12}件`:''}`);if(!out.length)throw Error('読み込めるプログラムがありません。');return out;
+ if(errors.length)throw Error(`CSVに修正が必要な箇所があります。\n${errors.slice(0,12).join('\n')}${errors.length>12?`\nほか ${errors.length-12}件`:''}`);
+ if(!out.length)throw Error('読み込めるプログラムがありません。');return out;
 }
+
 function renderAdminPrograms(){
  if(!adminProgramVenue || !state.zones.some(z=>z.id===adminProgramVenue))adminProgramVenue=state.zones[0]?.id||'';
  const selectedZone=getZone(adminProgramVenue);
@@ -1134,6 +1229,7 @@ function removeDemoPrograms(){
  toast('デモデータを削除しました');
 }
 function bindAdminProgramEvents(){
+ byId('downloadProgramXlsx').addEventListener('click',downloadProgramExcel);
  $$('[data-session-setting]').forEach(row=>row.querySelectorAll('[data-session-time]').forEach(input=>input.addEventListener('change',()=>{const id=row.dataset.sessionSetting,start=row.querySelector('[data-session-time="start"]').value,end=row.querySelector('[data-session-time="end"]').value;if(!start||!end||timeNum(start)>=timeNum(end)){alert('開始時刻より後に終了時刻を設定してください。');renderAdminPrograms();return;}state.sessions[id]={...state.sessions[id],label:DEFAULT_SESSIONS[id].label,start,end};syncSessionProgramTimes();persist();renderAdminPrograms();renderPublic();toast(`${sessionLabel(id)}の時間を保存しました`)})));
  byId('programVenueSelect')?.addEventListener('change',e=>{adminProgramVenue=e.target.value;renderAdminPrograms()});
  $$('[data-vpfield]').forEach(el=>el.addEventListener('change',e=>{const row=e.target.closest('[data-program]'),p=state.programs.find(x=>x.id===row.dataset.program);if(!p)return;const field=e.target.dataset.vpfield,old=p[field];p[field]=e.target.value;if(field==='session'){const d=sessionDef(p.session);p.start=d.start;p.end=d.end;}if(hasDuplicateVenueSession(p)){alert('同じ会場の同じセッションには、すでに別の発表が登録されています。');p[field]=old;renderAdminPrograms();return;}if(field==='zoneId'&&p.zoneId)adminProgramVenue=p.zoneId;persist();renderAdminPrograms();renderPublic();toast('発表内容を保存しました')}));
