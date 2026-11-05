@@ -20,8 +20,8 @@ function orderedPrograms(data){
 function programGroups(){
   const data=appData();if(!data)return [];
   const ps=orderedPrograms(data),out=[];
-  const afternoon=ps.filter(p=>p.session==='afternoon');
-  if(afternoon.length)out.push({key:'group:afternoon',label:`午後の有志発表（まとめ・${afternoon.length}件）`,title:'午後の有志発表',ids:afternoon.map(p=>p.id),programs:afternoon});
+  const afternoon=ps.filter(p=>p.programKind==='volunteer');
+  if(afternoon.length)out.push({key:'group:afternoon',label:`有志発表（まとめ・${afternoon.length}件）`,title:'有志発表',ids:afternoon.map(p=>p.id),programs:afternoon});
   const choir=ps.filter(p=>/合唱/.test(`${p.title||''} ${p.group||''}`));
   if(choir.length>1)out.push({key:'group:choir',label:`合唱（まとめ・${choir.length}件）`,title:'合唱',ids:choir.map(p=>p.id),programs:choir});
   for(const p of ps){
@@ -31,7 +31,7 @@ function programGroups(){
   return out;
 }
 function selectedGroup(){const key=$('photoProgramSelect')?.value;return programGroups().find(g=>g.key===key)||null;}
-function reactionIdsForGroup(group){return [...new Set((group?.programs||[]).filter(p=>['s1','s2','s3','s4','afternoon'].includes(p.session)).map(p=>p.reactionId||p.id).filter(Boolean))];}
+function reactionIdsForGroup(group){return [...new Set((group?.programs||[]).filter(p=>p.programKind?['reaction','volunteer'].includes(p.programKind):['s1','s2','s3','s4'].includes(p.session)).map(p=>p.reactionId||p.id).filter(Boolean))];}
 function renderProgramOptions(force=false){
   const sel=$('photoProgramSelect');if(!sel)return;
   const groups=programGroups();const current=force?'':sel.value;

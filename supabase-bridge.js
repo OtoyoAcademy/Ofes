@@ -177,7 +177,7 @@ window.OFESReactions={
     try{
       const gate=publishStatus();if(!gate.ok)throw Error(gate.message);
       const eventDate=publishedData.eventDate;
-      if(!publishedData.programs?.some(p=>(p.reactionId||p.id)===programId))throw Error('公開されていない発表です。');
+      if(!publishedData.programs?.some(p=>isReactionTargetProgram(p)&&(p.reactionId||p.id)===programId))throw Error('リアクション対象として公開されていない発表です。');
       let { data:{ user } } = await supabase.auth.getUser();
       if(!user){
         const { data, error }=await supabase.auth.signInAnonymously();if(error)throw error;user=data.user;
@@ -200,7 +200,7 @@ window.OFESReactions={
 };
 async function restoreCachedReactions(){
   const uid=currentUser?.id,date=publishedData?.eventDate;if(!uid||!date)return;
-  const ids=[...new Set((publishedData.programs||[]).map(p=>p.reactionId||p.id).filter(Boolean))];
+  const ids=[...new Set((publishedData.programs||[]).filter(isReactionTargetProgram).map(p=>p.reactionId||p.id).filter(Boolean))];
   const cache=readSelectionCache();
   ids.forEach(id=>emitSelection(id,Array.isArray(cache[`${date}|${id}|${uid}`])?cache[`${date}|${id}|${uid}`]:[],uid));
   if(!ids.length)return;
@@ -209,7 +209,7 @@ async function restoreCachedReactions(){
   const map=new Map((data||[]).map(r=>[r.program_id,Array.isArray(r.selected)?r.selected:[]]));
   ids.forEach(id=>{const selected=map.get(id)||[];cacheSelection(date,id,uid,selected);emitSelection(id,selected,uid);});
 }
-function isReactionTargetProgram(p){return !!p&&(['s1','s2','s3','s4'].includes(p.session)||p.session==='afternoon');}
+function isReactionTargetProgram(p){return !!p&&(p.programKind?['reaction','volunteer'].includes(p.programKind):['s1','s2','s3','s4'].includes(p.session));}
 function sessionText(p){if(['s1','s2','s3','s4'].includes(p.session)){const d=publishedData?.sessions?.[p.session];return d?.label||({s1:'セッション①',s2:'セッション②',s3:'セッション③',s4:'セッション④'}[p.session]||p.session);}return p.session==='afternoon'?'午後':'その他';}
 function zoneText(p){return publishedData?.zones?.find(z=>z.id===p.zoneId)?.name||(p.zoneId||'会場未設定');}
 function gradeLabels(gradeText){const text=String(gradeText||'').trim();const nums=[...new Set((text.match(/\d+/g)||[]).map(Number).filter(n=>n>=1&&n<=9))].sort((a,b)=>a-b);return nums.length?nums.map(n=>`${n}年生`):[text||'全体・その他'];}

@@ -14,10 +14,10 @@
   <link rel="stylesheet" href="style.css?v=141">
   <script defer src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="assets/vendor/jszip.min.js"></script>
-  <script defer src="app.js?v=141"></script>
-  <script defer src="photo-collage.js?v=141"></script>
+  <script defer src="app.js?v=142"></script>
+  <script defer src="photo-collage.js?v=142"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script type="module" src="supabase-bridge.js?v=141"></script>
+  <script type="module" src="supabase-bridge.js?v=142"></script>
 </head>
 <body>
 <div id="entryGate" class="entry-gate" hidden>
@@ -142,7 +142,7 @@
 <div id="loginModal" class="modal admin-login-modal" hidden><div class="modal-inner"><h2>管理画面を開く</h2><p class="muted">このパスワードは管理画面を開くための簡易ロックです。Supabaseの書き込み権限は、別途Supabase Authで管理します。</p><form id="loginForm"><label>管理者パスワード<input type="password" id="adminPassword" required autocomplete="current-password"></label><p id="loginError" class="error"></p><div class="modal-actions"><button type="button" class="btn light" id="cancelLogin">キャンセル</button><button type="submit" class="btn primary">ログイン</button></div></form></div></div>
 
 <section id="adminPanel" class="admin-panel" hidden>
-  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.41 · 重複登録・読み仮名・会場図表示の修正</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
+  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.42 · 区分・有志発表・アンケート公開範囲</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
   <nav class="admin-tabs" id="adminNav" aria-label="管理項目"><button data-admin="preflight" class="active">✅ 本番前チェック</button><button data-admin="firebase">🔑 Supabase接続</button><button data-admin="venues">会場・配置図</button><button data-admin="program">プログラム</button><button data-admin="reactions">リアクション集計</button><button data-admin="photos">📷 写真コラージュ</button><button data-admin="basic">年度・時刻テスト</button><button data-admin="surveys">アンケート</button><button data-admin="notice">お知らせPDF</button><button data-admin="stampqr">スタンプQR</button><button data-admin="years">年度データ</button><button data-admin="data">データ保存</button></nav>
 
 
@@ -230,19 +230,13 @@
   </div>
 
   <div class="admin-page" id="admin-program">
-    <div class="admin-intro"><strong>入力は2段階です。</strong> ①セッション①〜④の時間帯を設定 → ②会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。同じ時間帯を会場ごとに繰り返し入力する必要はありません。<p class="caption"><strong>児童生徒名：</strong>一般来場者には表示されません。「大豊学園」入口から年度用パスコードで入った関係者と管理者だけに表示します。個人名は必ず専用の「児童生徒名」欄へ入力してください。</p><p class="caption"><strong>公開：</strong>変更はこのブラウザの下書きに保存されます。内容を確認後、「データ保存」から「Supabaseへ公開」を押すと来場者へ反映されます。</p></div>
-    <div class="editor-card demo-data-card">
-      <h3>デモデータで動きを確認</h3>
-      <p class="muted">2025年度のおおとよ家フェスティバルの時間構成を参考に、登録済みの会場を使ってセッション①〜④（最大16発表）と午後のステージ発表を下書きに追加します。<strong>会場登録は変更しません。</strong>既存の本番プログラムも残したまま、デモ用プログラムだけを追加・削除できます。</p>
-      <div class="row-actions"><button type="button" id="addDemoData" class="btn primary">デモデータを登録</button><button type="button" id="removeDemoData" class="btn light">デモデータを削除</button></div>
-      <p id="demoDataMessage" class="caption" role="status">登録直後、この端末では「会場案内」に実施場所が反映され、セッション①を選んだ状態で確認できます。別ブラウザやスマホで試す場合は「データ保存」→「Supabaseへ公開」を押してください。</p>
-    </div>
+    <div class="admin-intro"><strong>入力は2段階です。</strong> ①セッション①〜④の時間帯を設定 → ②会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。同じ時間帯を会場ごとに繰り返し入力する必要はありません。<p class="caption"><strong>児童生徒名：</strong>一般来場者には表示されません。「大豊学園」入口から年度用パスコードで入った関係者と管理者だけに表示します。個人名は必ず専用の「児童生徒名」欄へ入力してください。</p><p class="caption"><strong>リアクション区分：</strong>「リアクション対象」「リアクションなし」「有志発表（リアクション対象）」から発表ごとに指定します。有志発表だけが折りたたまれ、その他の午後行事は個別表示されます。<br><strong>公開：</strong>変更はこのブラウザの下書きに保存されます。内容を確認後、「データ保存」から「Supabaseへ公開」を押すと来場者へ反映されます。</p></div>
     <div class="editor-card program-csv-card">
       <h3>Excelでプログラムを一括入力</h3>
-      <p class="muted"><strong>Excel形式（.xlsx）が新しい入力様式です。</strong>「プログラム入力」「入力説明」「選択肢設定」の3タブがあります。<strong>ダウンロード時点で「会場・配置図」に登録済みの会場名を選択肢へ自動反映</strong>します。入力タブでは<strong>会場IDではなく場所名</strong>をプルダウンで選べます。セッション①〜④を選ぶと、<strong>その時点で設定されている開始・終了時刻がC・D列へ自動表示</strong>されます。発表学年には「保育所」「実行委員」「吹奏楽部」「音楽部」も選べます。セッション以外の時刻はJ・K列に入力してください。<strong>入力後はExcelのまま読み込めるため、CSV保存は不要です。</strong></p>
+      <p class="muted"><strong>Excel形式（.xlsx）が新しい入力様式です。</strong>「プログラム入力」「入力説明」「選択肢設定」の3タブがあります。<strong>ダウンロード時点で「会場・配置図」に登録済みの会場名を選択肢へ自動反映</strong>します。入力タブでは<strong>会場IDではなく場所名</strong>をプルダウンで選べます。セッション①〜④を選ぶと、<strong>その時点で設定されている開始・終了時刻がC・D列へ自動表示</strong>されます。発表学年には「保育所」「実行委員」「吹奏楽部」「音楽部」も選べます。セッション以外の時刻はJ・K列に入力してください。<strong>L列「リアクション区分」で3種類から選択できます（未選択はセッション＝対象、それ以外＝対象外）。</strong>入力後はExcelのまま読み込めます。</p>
       <div class="row-actions"><button type="button" id="downloadProgramXlsx" class="btn primary">会場名・セッション時間入りExcelをダウンロード（.xlsx）</button></div>
       <p class="caption">Excel入力様式はアプリに組み込まれているため、テンプレートファイルの公開先に依存しません。</p>
-      <p class="caption"><strong>操作手順：</strong>①「会場・配置図」で会場を登録・保存 → ②上のボタンでExcel（.xlsx）をダウンロード → ③会場名・セッションを選択して時間を自動表示（午前・午後・その他はJ・K列へ時間入力） → ④Excelのまま保存 → ⑤下からExcelファイルを選んで読み込む。<strong>既存会場名を変更したときは再ダウンロードしてください。</strong> Excel／CSV取込時に場所名を会場IDへ変換します。従来のCSVファイルも引き続き読み込めます。</p>
+      <p class="caption"><strong>操作手順：</strong>①「会場・配置図」で会場を登録・保存 → ②上のボタンでExcel（.xlsx）をダウンロード → ③会場名・セッションを選択して時間を自動表示（午前・午後・その他はJ・K列へ時間入力） → ④ExcelのL列でリアクション区分を指定して保存 → ⑤下からExcelファイルを選んで読み込む。<strong>既存会場名を変更したときは再ダウンロードしてください。</strong> Excel／CSV取込時に場所名を会場IDへ変換します。従来のCSVファイルも引き続き読み込めます。</p>
       <label>入力済みExcel／CSVを選ぶ<input type="file" id="programCsvFile" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"></label>
       <label>読み込み方法<select id="programCsvMode"><option value="replace">現在のプログラムをすべて置き換える（通常はこちら）</option><option value="append">現在のプログラムに追加する（同一内容は追加しない）</option></select></label>
       <div class="row-actions"><button type="button" id="importProgramCsv" class="btn primary">Excel／CSVを読み込む</button></div>

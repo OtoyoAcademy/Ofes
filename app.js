@@ -16,6 +16,17 @@ const ACCESS_MODE_KEY='ofes-access-mode-v127';
 // 試作版の画面ロックのみ。Supabaseの安全な認証には使用しない。
 const DEMO_ADMIN_PASSWORD='ofes0034';
 const SESSION_IDS=['s1','s2','s3','s4'];
+// 発表区分と時間帯は独立。午後であっても有志発表とは限らない。
+const PROGRAM_KINDS={reaction:'リアクション対象',none:'リアクションなし',volunteer:'有志発表（リアクション対象）'};
+function programKind(p){
+ const raw=String(p?.programKind||'');
+ return Object.prototype.hasOwnProperty.call(PROGRAM_KINDS,raw)?raw:(SESSION_IDS.includes(p?.session)?'reaction':'none');
+}
+function programKindOptions(selected){
+ return Object.entries(PROGRAM_KINDS).map(([id,label])=>`<option value="${id}" ${id===selected?'selected':''}>${label}</option>`).join('');
+}
+function isReactionTarget(p){return programKind(p)!=='none';}
+
 const DEFAULT_SESSIONS={
  s1:{label:'セッション①',start:'09:20',end:'09:40'},
  s2:{label:'セッション②',start:'09:50',end:'10:10'},
@@ -38,10 +49,7 @@ const DEFAULT_DATA = {
  test:{enabled:false,date:'2026-11-21',time:'09:25'},
  sessions:JSON.parse(JSON.stringify(DEFAULT_SESSIONS)),
  zones:[],safetyItems:[],nextSafetyId:1,nextIds:{campus:1,zenki1:1,zenki2:1,koki1:1,koki2:1,koki3:1},
- programs:[
-  {id:'p1',session:'other',start:'08:45',end:'09:05',grade:'',group:'',title:'開会行事・アトラクション',zoneId:'',presenters:''},
-  {id:'p6',session:'afternoon',start:'13:32',end:'13:38',grade:'',group:'',title:'午後のステージ発表（仮）',zoneId:'',presenters:''}
- ]
+ programs:[]
 };
 const clone = (v)=>JSON.parse(JSON.stringify(v));
 const esc = (v)=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -52,7 +60,7 @@ function reactionProgramKey(p){
 }
 function syncReactionGroups(target){
  const programs=target?.programs||[];
- const eligible=programs.filter(p=>SESSION_IDS.includes(p.session)||p.session==='afternoon');
+ const eligible=programs.filter(isReactionTarget);
  const usage=new Map();
  for(const p of eligible){
   if(!p.reactionId)continue;
@@ -65,7 +73,7 @@ function syncReactionGroups(target){
   const chosen=stable||items[0]?.id||`reaction-${Date.now()}`;
   items.forEach(p=>p.reactionId=chosen);
  }
- for(const p of programs){if(!(SESSION_IDS.includes(p.session)||p.session==='afternoon')&&!p.reactionId)p.reactionId=p.id;}
+ for(const p of programs){if(!isReactionTarget(p)&&!p.reactionId)p.reactionId=p.id;}
 }
 const CAMPUS_CANVAS_SCALE=0.849825378346915;
 const CAMPUS_CANVAS_OFFSET=7.508731082654249;
@@ -125,7 +133,7 @@ function validData(v){
  out.programs=v.programs.filter(p=>p&&typeof p.id==='string').map(p=>{
   const session=String(p.session||'other');
   const sd=out.sessions[session];
-  return {id:p.id,reactionId:String(p.reactionId||''),session,start:sd?.start||String(p.start||'09:00'),end:sd?.end||String(p.end||'09:20'),grade:String(p.grade||''),group:String(p.group||''),title:String(p.title||'発表'),zoneId:String(p.zoneId||''),presenters:String(p.presenters||'')};
+  return {id:p.id,reactionId:String(p.reactionId||''),programKind:programKind(p),session,start:sd?.start||String(p.start||'09:00'),end:sd?.end||String(p.end||'09:20'),grade:String(p.grade||''),group:String(p.group||''),title:String(p.title||'発表'),zoneId:String(p.zoneId||''),presenters:String(p.presenters||'')};
  });
  // Ver.1.14: リアクションは「学年 + 発表グループ + 発表内容」を1つの発表単位として扱う。
  // 同じグループが複数セッションで同じ発表を行う場合だけreactionIdを共有する。
@@ -138,7 +146,7 @@ function validData(v){
  out.stampHints=Array.from({length:5},(_,i)=>String(Array.isArray(v.stampHints)?(v.stampHints[i]||''):''));
  const rawSurveys=Array.isArray(v.surveys)?v.surveys:[];
  out.surveys=rawSurveys.filter(x=>x&&typeof x==='object').map((x,i)=>{
-  const target=['public','internal','both'].includes(String(x.target))?String(x.target):'both';
+  const target=String(x.target)==='internal'?'internal':'both';
   const startAt=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(x.startAt||''))?String(x.startAt):'';
   const endAt=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(x.endAt||''))?String(x.endAt):'';
   return {id:String(x.id||`survey-${i+1}`),title:String(x.title||'アンケート'),message:String(x.message||''),url:String(x.url||''),image:/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/i.test(String(x.image||''))?String(x.image):'',buttonLabel:String(x.buttonLabel||'回答する'),enabled:x.enabled!==false,target,startAt,endAt,order:Number.isFinite(Number(x.order))?Number(x.order):i+1};
@@ -156,7 +164,7 @@ try {hasLegacyDraft=!!localStorage.getItem(STORAGE_KEY);} catch(e) {console.warn
 let draftState=getSaved();
 let publishedState=null;
 let editorActive=false;
-// デモ登録後は、この端末だけ下書きを来場者画面で即時プレビューする。再読み込みすると解除される。
+// サンプルデータの新規生成は廃止。既に登録済みの下書きは勝手に消さない。
 let demoDraftPreview=false;
 let state=draftState;
 let cloudAvailable=false;
@@ -280,7 +288,7 @@ function surveyIsActive(item){if(!item||item.enabled===false||!String(item.url||
 function visibleSurveys(){
  let list=Array.isArray(state.surveys)?state.surveys.slice():[];
  if(audienceMode==='internal'&&internalSurveyList.length){const merged=new Map(list.map(x=>[x.id,x]));for(const x of internalSurveyList)merged.set(x.id,{...x,target:'internal'});list=[...merged.values()];}
- return list.filter(x=>{if(!surveyIsActive(x))return false;if(audienceMode==='internal')return x.target==='internal'||x.target==='both'||x.target==='public';return x.target==='public'||x.target==='both';}).sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0)||String(a.title).localeCompare(String(b.title),'ja'));
+ return list.filter(x=>{if(!surveyIsActive(x))return false;if(audienceMode==='internal')return x.target==='internal'||x.target==='both';return x.target==='both';}).sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0)||String(a.title).localeCompare(String(b.title),'ja'));
 }
 function renderSurveys(){const panel=byId('surveyPanel'),cards=byId('surveyCards');if(!panel||!cards)return;const list=visibleSurveys();panel.hidden=!list.length;if(!list.length){cards.innerHTML='';return;}const label=byId('surveyAudienceLabel');if(label)label.textContent=audienceMode==='internal'?'大豊学園向けを含む':'来場者向け';cards.innerHTML=list.map(x=>`<article class="survey-card"><div><strong>${esc(x.title)}</strong>${x.message?`<p>${esc(x.message).replace(/\n/g,'<br>')}</p>`:''}${x.image?`<button class="survey-poster-button" type="button" data-survey-preview="${esc(x.id)}" aria-label="${esc(x.title)}の参考画像を拡大する"><img src="${esc(x.image)}" alt="${esc(x.title)}の参考ポスター"><span>🔍 ポスターを拡大する</span></button>`:''}${x.endAt?`<small>回答期間：〜 ${esc(x.endAt.replace('T',' '))}</small>`:''}</div><a class="survey-link" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.buttonLabel||'回答する')} ↗</a></article>`).join('');cards.querySelectorAll('[data-survey-preview]').forEach(btn=>btn.addEventListener('click',()=>{const item=list.find(x=>x.id===btn.dataset.surveyPreview);if(!item?.image)return;const modal=byId('surveyImageModal');byId('surveyImageLarge').src=item.image;byId('surveyImageLarge').alt=`${item.title}の参考画像`;modal.hidden=false;}));}
 
@@ -300,13 +308,13 @@ function renderProgram(){
  }
  byId('timeStatus').innerHTML=text;
  const units=[];
- // 午前セッションは時間帯ごと、午後の有志発表も1つの折りたたみグループにまとめる。
- for(const p of filteredOrdered.filter(p=>!SESSION_IDS.includes(p.session) && p.session!=='afternoon')){const pt=programTimes(p);units.push({type:'single',start:pt.start,p});}
- for(const sid of SESSION_IDS){const ps=filteredOrdered.filter(p=>p.session===sid);if(ps.length){const d=sessionDef(sid);units.push({type:'session',start:d.start,sid,programs:ps});}}
- const afternoonPrograms=filteredOrdered.filter(p=>p.session==='afternoon');
+ // セッションは時間帯ごと。有志発表だけを独立して折りたたむ。その他の午後行事は個別表示。
+ for(const p of filteredOrdered.filter(p=>!SESSION_IDS.includes(p.session) && programKind(p)!=='volunteer')){const pt=programTimes(p);units.push({type:'single',start:pt.start,p});}
+ for(const sid of SESSION_IDS){const ps=filteredOrdered.filter(p=>p.session===sid&&programKind(p)!=='volunteer');if(ps.length){const d=sessionDef(sid);units.push({type:'session',start:d.start,sid,programs:ps});}}
+ const afternoonPrograms=filteredOrdered.filter(p=>programKind(p)==='volunteer');
  if(afternoonPrograms.length){
-  const starts=afternoonPrograms.map(p=>timeNum(programTimes(p).start));
-  units.push({type:'afternoon-group',start:programTimes(afternoonPrograms[0]).start,programs:afternoonPrograms,groupStart:Math.min(...starts)});
+  const firstVolunteer=afternoonPrograms.reduce((a,b)=>timeNum(programTimes(a).start)<=timeNum(programTimes(b).start)?a:b);
+  units.push({type:'volunteer-group',start:programTimes(firstVolunteer).start,programs:afternoonPrograms});
  }
  units.sort((a,b)=>timeNum(a.start)-timeNum(b.start)||String(a.sid||a.p?.id||a.type||'').localeCompare(String(b.sid||b.p?.id||b.type||'')));
  if(!units.length){
@@ -321,17 +329,17 @@ function renderProgram(){
    const items=unit.programs.slice().sort((a,b)=>String(roomLabel(a)).localeCompare(String(roomLabel(b)))).map(p=>`<div class="session-program-item"><div class="session-program-main"><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`).join('');
    return `<details class="program-session-group ${st.key==='live'?'on':''}" ${st.key==='live'?'open':''}><summary class="program-session-summary"><span class="time">${esc(d.start)}</span><span class="session-summary-main"><strong>${esc(d.label)}</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(d.start)}〜${esc(d.end)}　${unit.programs.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
   }
-  if(unit.type==='afternoon-group'){
+  if(unit.type==='volunteer-group'){
    const ps=unit.programs.slice().sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||String(a.id).localeCompare(String(b.id)));
    const first=programTimes(ps[0]),last=programTimes(ps[ps.length-1]);
    const anyLive=ps.some(p=>programStatus(p).key==='live');
    const allEnded=ps.every(p=>programStatus(p).key==='ended');
    const st=anyLive?{key:'live',label:'発表中'}:(allEnded?{key:'ended',label:'終了しました'}:{key:'upcoming',label:'発表予定'});
    const items=ps.map(p=>{const pt=programTimes(p),pst=programStatus(p);return `<div class="session-program-item"><div class="session-program-main"><div class="afternoon-program-time">${esc(pt.start)}〜${esc(pt.end)} <span class="program-status status-${pst.key}">${pst.label}</span></div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`}).join('');
-   return `<details class="program-session-group afternoon-program-group ${st.key==='live'?'on':''}" ${st.key==='live'?'open':''}><summary class="program-session-summary"><span class="time">${esc(first.start)}</span><span class="session-summary-main"><strong>午後の有志発表</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(first.start)}〜${esc(last.end)}　${ps.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
+   return `<details class="program-session-group afternoon-program-group ${st.key==='live'?'on':''}" ${st.key==='live'?'open':''}><summary class="program-session-summary"><span class="time">${esc(first.start)}</span><span class="session-summary-main"><strong>有志発表</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(first.start)}〜${esc(last.end)}　${ps.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
   }
   const p=unit.p,pt=programTimes(p),st=programStatus(p);
-  return `<div class="program-row ${st.key==='live'?'on':''}"><div class="time">${esc(pt.start)}</div><div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<span class="program-status status-${st.key}">${st.label}</span><div class="where">${esc(sessionLabel(p.session))}　${esc(pt.start)}〜${esc(pt.end)}　${esc(roomLabel(p))} <button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div></div></div>`;
+  return `<div class="program-row ${st.key==='live'?'on':''}"><div class="time">${esc(pt.start)}</div><div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<span class="program-status status-${st.key}">${st.label}</span><div class="where">${esc(sessionLabel(p.session))}　${esc(pt.start)}〜${esc(pt.end)}　${esc(roomLabel(p))} <button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>${reactionsHtml(p)}</div></div>`;
  }).join('');
  $$('[data-see]').forEach(b=>b.onclick=()=>{
   if(!b.dataset.see)return;
@@ -407,7 +415,7 @@ function floorDetailHtml(m){
  ps.sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||timeNum(programTimes(a).end)-timeNum(programTimes(b).end)||String(a.id).localeCompare(String(b.id)));
  return `<h4>${esc(z.name)} <span class="pill">${esc(z.id)}</span></h4>${z.note?`<p>${esc(z.note)}</p>`:''}
  <p class="muted">${esc(m.name)}　登録されている発表：${ps.length}件</p>
- ${ps.length?`<div class="venue-program-list">${ps.map(p=>{const pt=programTimes(p),st=programStatus(p);return `<article class="venue-program-item status-border-${st.key}"><div class="venue-program-meta"><span class="program-status status-${st.key}">${st.label}</span><strong>${esc(sessionLabel(p.session))}</strong><span>${esc(pt.start)}〜${esc(pt.end)}</span></div><div class="venue-program-title">${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</div>${presentersHtml(p)}${SESSION_IDS.includes(p.session)?reactionsHtml(p):''}</article>`}).join('')}</div>`:'<p>この会場のプログラムはまだ登録されていません。</p>'}`;
+ ${ps.length?`<div class="venue-program-list">${ps.map(p=>{const pt=programTimes(p),st=programStatus(p);return `<article class="venue-program-item status-border-${st.key}"><div class="venue-program-meta"><span class="program-status status-${st.key}">${st.label}</span><strong>${esc(sessionLabel(p.session))}</strong><span>${esc(pt.start)}〜${esc(pt.end)}</span></div><div class="venue-program-title">${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</div>${presentersHtml(p)}${reactionsHtml(p)}</article>`}).join('')}</div>`:'<p>この会場のプログラムはまだ登録されていません。</p>'}`;
 }
 function updateSelectedFloorDetails(){
  $$('#visitorMaps [data-zone]').forEach(b=>{
@@ -656,6 +664,7 @@ function reactionEligibility(p){
  return Date.now()<deadline.getTime()?{active:true,preview:false,reason:''}:{active:false,reason:'リアクションの受付は終了しました'};
 }
 function reactionsHtml(p){
+ if(!isReactionTarget(p))return '';
  const info=reactionEligibility(p);
  const reactionId=p.reactionId||p.id;
  const selected=reactionSelection[reactionId]||[];
@@ -1001,13 +1010,13 @@ async function readProgramExcel(file){
   for(const row of [...data.getElementsByTagNameNS(ns,'row')]){
   const rowNumber=Number(row.getAttribute('r'))||0;
   if(rowNumber<1||rowNumber>301)continue;
-  const fields=Array(11).fill('');
+  const fields=Array(12).fill('');
   for(const cell of [...row.getElementsByTagNameNS(ns,'c')]){
    const address=cell.getAttribute('r')||'';
    const match=/^([A-Z]+)\d+$/.exec(address);if(!match)continue;
    const colIndex=[...match[1]].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0)-1;
    // Ver.1.38: J/K are optional manually entered times for non-session items.
-   if(colIndex<0||colIndex>=11)continue;
+   if(colIndex<0||colIndex>=12)continue;
    const type=cell.getAttribute('t')||'';
    const raw=cell.getElementsByTagNameNS(ns,'v')[0]?.textContent||'';
    let val=type==='s'?shared[Number(raw)]||'':type==='inlineStr'?
@@ -1029,7 +1038,7 @@ async function readProgramExcel(file){
  }
  if(!out.length||out[0][0]!=='種別')throw Error('入力タブの見出しが見つかりません。OFES専用のExcel様式をお使いください。');
  if(out.length<2)throw Error('Excelにプログラムが入力されていません。');
- return out.map(fields=>fields.slice(0,9).map(value=>`"${String(value).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+ return out.map(fields=>[...fields.slice(0,9),fields[11]].map(value=>`"${String(value).replace(/"/g,'""')}"`).join(',')).join('\r\n');
 }
 async function readProgramImportFile(file){
  const name=String(file.name||'').toLowerCase();
@@ -1108,6 +1117,62 @@ async function downloadProgramExcel(event){
    setText(i+4,'I',schedule.end);
   });
   zip.file(sheetPath,new XMLSerializer().serializeToString(xml));
+  // Ver.1.42: Excel入力欄に独立した「リアクション区分」列（L）を追加。
+  // 既存のA列「種別」は時刻区分として残し、午前／午後の内容を一括扱いしない。
+  const inputPath='xl/worksheets/sheet1.xml';
+  const inputFile=zip.file(inputPath);
+  if(!inputFile)throw Error('入力タブが見つかりません。');
+  const inputXml=new DOMParser().parseFromString(await inputFile.async('string'),'application/xml');
+  if(inputXml.getElementsByTagName('parsererror').length)throw Error('入力タブの解析に失敗しました。');
+  const inputData=inputXml.getElementsByTagNameNS(ns,'sheetData')[0];
+  const makeCell=(row,column,style,text)=>{
+   const address=column+row.getAttribute('r');
+   let c=[...row.children].find(el=>el.localName==='c'&&el.getAttribute('r')===address);
+   if(!c){c=inputXml.createElementNS(ns,'c');c.setAttribute('r',address);row.appendChild(c);}
+   if(style)c.setAttribute('s',style);
+   if(text!==undefined){while(c.firstChild)c.removeChild(c.firstChild);c.setAttribute('t','inlineStr');const inline=inputXml.createElementNS(ns,'is'),t=inputXml.createElementNS(ns,'t');t.textContent=text;inline.appendChild(t);c.appendChild(inline);}
+   return c;
+  };
+  for(const row of [...inputData.children].filter(el=>el.localName==='row')){
+   const n=Number(row.getAttribute('r'));
+   if(!n||n>301)continue;
+   const style=[...row.children].find(el=>el.localName==='c'&&el.getAttribute('r')===`F${n}`)?.getAttribute('s')||'';
+   makeCell(row,'L',style,n===1?'リアクション区分':undefined);
+  }
+  const dim=inputXml.getElementsByTagNameNS(ns,'dimension')[0];if(dim)dim.setAttribute('ref','A1:L301');
+  const validations=inputXml.getElementsByTagNameNS(ns,'dataValidations')[0];
+  if(validations){
+   const item=inputXml.createElementNS(ns,'dataValidation');
+   Object.entries({sqref:'L2:L301',type:'list',allowBlank:'1',showErrorMessage:'1',errorTitle:'選択肢から選んでください',error:'区分は3種類から選択してください'}).forEach(([k,v])=>item.setAttribute(k,v));
+   const formula=inputXml.createElementNS(ns,'formula1');formula.textContent='"リアクション対象,リアクションなし,有志発表（リアクション対象）"';item.appendChild(formula);validations.appendChild(item);
+   validations.setAttribute('count',String(validations.children.length));
+  }
+  const cols=inputXml.getElementsByTagNameNS(ns,'cols')[0];if(cols){const c=inputXml.createElementNS(ns,'col');c.setAttribute('min','12');c.setAttribute('max','12');c.setAttribute('width','32');c.setAttribute('customWidth','1');cols.appendChild(c);}
+  zip.file(inputPath,new XMLSerializer().serializeToString(inputXml));
+  // 説明タブにも新しいL列の使い方を追記する。
+  const guidePath='xl/worksheets/sheet2.xml';
+  const guideFile=zip.file(guidePath);
+  if(guideFile){
+   const guide=new DOMParser().parseFromString(await guideFile.async('string'),'application/xml');
+   const guideRows=guide.getElementsByTagNameNS(ns,'sheetData')[0];
+   let row19=[...guideRows.children].find(el=>el.localName==='row'&&el.getAttribute('r')==='19');
+   if(!row19){
+    row19=guide.createElementNS(ns,'row');row19.setAttribute('r','19');
+    const next=[...guideRows.children].find(el=>el.localName==='row'&&Number(el.getAttribute('r'))>19);
+    if(next)guideRows.insertBefore(row19,next);else guideRows.appendChild(row19);
+   }
+   if(row19){
+    const putGuide=(column,text)=>{
+     const addr=`${column}19`;
+     let cell=[...row19.children].find(el=>el.localName==='c'&&el.getAttribute('r')===addr);
+     if(!cell){cell=guide.createElementNS(ns,'c');cell.setAttribute('r',addr);row19.appendChild(cell);}
+     while(cell.firstChild)cell.removeChild(cell.firstChild);
+     cell.setAttribute('t','inlineStr');const is=guide.createElementNS(ns,'is'),t=guide.createElementNS(ns,'t');t.textContent=text;is.appendChild(t);cell.appendChild(is);
+    };
+    putGuide('A','L：リアクション区分');putGuide('B','「リアクション対象」「リアクションなし」「有志発表（リアクション対象）」から選択。未選択の場合はセッションのみ対象扱い。午後の通常行事は自動で折りたたまれません。');
+    zip.file(guidePath,new XMLSerializer().serializeToString(guide));
+   }
+  }
   const blob=new Blob([await zip.generateAsync({type:'uint8array',compression:'DEFLATE',compressionOptions:{level:6}})],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const url=URL.createObjectURL(blob),a=document.createElement('a');
   a.href=url;a.download=`OFES_${state.year}年度_プログラム入力_会場名選択.xlsx`;document.body.appendChild(a);a.click();a.remove();
@@ -1121,7 +1186,7 @@ async function downloadProgramExcel(event){
 function programIdentityKey(p){
  const tidy=v=>String(v??'').normalize('NFKC').replace(/\s+/g,' ').trim();
  const t=programTimes(p);
- return JSON.stringify([p.session,tidy(p.zoneId),tidy(t.start),tidy(t.end),tidy(p.grade),tidy(p.group),tidy(p.title),tidy(p.presenters)]);
+ return JSON.stringify([p.session,programKind(p),tidy(p.zoneId),tidy(t.start),tidy(t.end),tidy(p.grade),tidy(p.group),tidy(p.title),tidy(p.presenters)]);
 }
 function duplicateProgramIds(programs=state.programs){
  const seen=new Set(),ids=[];
@@ -1154,11 +1219,15 @@ function parseProgramCsv(text,mode){
  for(let ri=headerAt+1;ri<rows.length;ri++){
   const r=rows[ri],first=String(r[0]||'').trim();if(!r.some(x=>String(x||'').trim())||first.startsWith('#'))continue;
   const type=String(r[idx['種別']]||'').trim(),sessionRaw=String(r[idx['セッション']]||'').trim(),start=String(r[idx['開始時刻']]||'').trim(),end=String(r[idx['終了時刻']]||'').trim();
+  const kindRaw=String(r[idx['リアクション区分']]||'').trim();
   const rawVenue=String(r[idx[venueCol]]||'').trim(),grade=String(r[idx['発表学年']]||'').trim(),group=String(r[idx['発表グループ']]||'').trim(),title=String(r[idx['発表内容']]||'').trim(),presenters=String(r[idx['児童生徒名（大豊学園のみ）']]||'').trim();
   const line=ri+1;if(!title){errors.push(`${line}行目：発表内容が空欄です。`);continue;}
   const resolved=resolveCsvVenue(rawVenue);
   if(resolved.error){errors.push(`${line}行目：${resolved.error}`);continue;}
   const zoneId=resolved.id;
+  const kindNames={'リアクション対象':'reaction','リアクションなし':'none','有志発表（リアクション対象）':'volunteer','reaction':'reaction','none':'none','volunteer':'volunteer'};
+  if(kindRaw&&!kindNames[kindRaw]){errors.push(`${line}行目：リアクション区分は3つの候補から選択してください。`);continue;}
+  const selectedKind=kindNames[kindRaw]||(type==='セッション'?'reaction':'none');
   let session='';
   if(type==='セッション'){
    session=normalizeCsvSession(sessionRaw);
@@ -1166,7 +1235,7 @@ function parseProgramCsv(text,mode){
    if(!zoneId){errors.push(`${line}行目：セッションの会場名が空欄です。`);continue;}
    const key=`${zoneId}|${session}`;
    const d=sessionDef(session);
-   const candidate={id:`p${Date.now()}-${ri}`,reactionId:'',session,start:d.start,end:d.end,grade,group,title,zoneId,presenters};
+   const candidate={id:`p${Date.now()}-${ri}`,reactionId:'',programKind:selectedKind,session,start:d.start,end:d.end,grade,group,title,zoneId,presenters};
    const identity=programIdentityKey(candidate);
    if(exactKeys.has(identity)){skipped++;continue;}
    if(seen.has(key)){errors.push(`${line}行目：${rawVenue} の ${sessionLabel(session)} はすでに登録されています（内容が異なります）。`);continue;}
@@ -1177,7 +1246,7 @@ function parseProgramCsv(text,mode){
    session=type==='午後'?'afternoon':'other';
    if(!csvTimeValid(start)||!csvTimeValid(end)){errors.push(`${line}行目：開始時刻・終了時刻を HH:MM で入力してください。`);continue;}
    if(timeNum(end)<=timeNum(start)){errors.push(`${line}行目：終了時刻は開始時刻より後にしてください。`);continue;}
-   const candidate={id:`p${Date.now()}-${ri}`,reactionId:'',session,start,end,grade,group,title,zoneId,presenters};
+   const candidate={id:`p${Date.now()}-${ri}`,reactionId:'',programKind:selectedKind,session,start,end,grade,group,title,zoneId,presenters};
    const identity=programIdentityKey(candidate);
    if(exactKeys.has(identity)){skipped++;continue;}
    exactKeys.add(identity);out.push(candidate);
@@ -1229,159 +1298,16 @@ function renderAdminPrograms(){
  </div>
  <div class="editor-card program-step-card"><div class="step-title"><span>1</span><div><h3>セッション①〜④の時間帯</h3><p class="muted">ここで設定した時間が、同じセッションを選んだすべての会場に共通で適用されます。</p></div></div>
  <div class="session-time-grid">${SESSION_IDS.map(id=>{const d=sessionDef(id);return `<div class="session-time-row" data-session-setting="${id}"><strong>${esc(d.label)}</strong><label>開始<input type="time" data-session-time="start" value="${esc(d.start)}"></label><label>終了<input type="time" data-session-time="end" value="${esc(d.end)}"></label></div>`}).join('')}</div></div>
- <div class="editor-card program-step-card"><div class="step-title"><span>2</span><div><h3>会場ごとの発表登録</h3><p class="muted">会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。開始・終了時刻は上の設定から自動で入ります。</p><p class="caption">発表学年は「7年生・8年生」「7・8年生」「6〜9年生」のように入力できます。児童生徒名は専用欄へ入力し、一般来場者には表示しません。</p></div></div>
+ <div class="editor-card program-step-card"><div class="step-title"><span>2</span><div><h3>会場ごとの発表登録</h3><p class="muted">会場を選び、リアクション区分・セッション・発表学年・発表グループ・発表内容を登録します。セッションの時刻は上の設定から自動で入ります。</p><p class="caption">発表学年は「7年生・8年生」「7・8年生」「6〜9年生」のように入力できます。児童生徒名は専用欄へ入力し、一般来場者には表示しません。</p></div></div>
  <label class="venue-program-selector">会場<select id="programVenueSelect">${state.zones.length?state.zones.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(z=>`<option value="${esc(z.id)}" ${z.id===adminProgramVenue?'selected':''}>${esc(z.id)}｜${esc(z.name)}</option>`).join(''):'<option value="">先に会場を登録してください</option>'}</select></label>
  <div class="venue-program-editor">${selectedZone?`<div class="venue-program-admin-heading"><strong>${esc(selectedZone.name)}</strong><span>${esc(selectedZone.id)}</span></div>${venuePrograms.length?venuePrograms.map(p=>adminVenueProgramRow(p)).join(''):'<p class="muted">この会場には、まだ発表が登録されていません。</p>'}<button type="button" id="addVenueProgram" class="btn light">＋ この会場に発表を登録</button>`:'<p class="muted">「会場・配置図」で会場を登録すると、ここから発表を追加できます。</p>'}</div></div>
  ${unassigned.length?`<div class="editor-card"><h3>会場未設定の発表</h3><p class="muted">旧バージョンから引き継いだ発表などです。会場を選択すると上の会場別登録へ移ります。</p><div class="legacy-program-list">${unassigned.map(p=>adminUnassignedRow(p)).join('')}</div></div>`:''}
- <details class="editor-card other-programs"><summary>開会行事・午後など、セッション以外の全体プログラム</summary><p class="muted">午後の体育館行事は「午後（プログラムでリアクション）」を選ぶと、来場者のプログラム画面にリアクションアイコンを表示します。</p><div class="admin-program-list">${other.map(p=>adminOtherProgramRow(p)).join('')}</div><div class="row-actions"><button type="button" id="addAfternoonProgram" class="btn light">＋ 午後プログラムを追加</button><button type="button" id="addOtherProgram" class="btn light">＋ その他の全体プログラムを追加</button></div></details>`;
+ <details class="editor-card other-programs"><summary>開会行事・午後など、セッション以外の全体プログラム</summary><p class="muted">時間帯とは別に、発表ごとに「リアクション対象」「リアクションなし」「有志発表（リアクション対象）」を選択します。有志発表のみ折りたたみ表示します。</p><div class="admin-program-list">${other.map(p=>adminOtherProgramRow(p)).join('')}</div><div class="row-actions"><button type="button" id="addAfternoonProgram" class="btn light">＋ 午後プログラムを追加</button><button type="button" id="addOtherProgram" class="btn light">＋ その他の全体プログラムを追加</button></div></details>`;
  bindAdminProgramEvents();
 }
-function adminVenueProgramRow(p){return `<div class="venue-program-admin-row" data-program="${esc(p.id)}"><label>セッション<select data-vpfield="session">${sessionOptions(p.session)}</select></label><label>発表学年（複数可）<input data-vpfield="grade" maxlength="40" placeholder="例：7年生・8年生" value="${esc(p.grade||'')}"></label><label>発表グループ<input data-vpfield="group" maxlength="40" placeholder="例：A班・1班" value="${esc(p.group||'')}"></label><label class="program-content-field">発表内容<input data-vpfield="title" maxlength="160" placeholder="発表内容を入力" value="${esc(p.title)}"></label><label class="program-presenters-field">児童生徒名（大豊学園のみ）<input data-vpfield="presenters" maxlength="300" placeholder="例：山田○○、田中○○" value="${esc(p.presenters||'')}"></label><div class="derived-time">${esc(programTimes(p).start)}〜${esc(programTimes(p).end)}</div><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button>${programDeleteCheckbox(p)}</div>`}
-function adminUnassignedRow(p){return `<div class="venue-program-admin-row legacy" data-program="${esc(p.id)}"><label>会場<select data-vpfield="zoneId">${roomOptions('')}</select></label><label>セッション<select data-vpfield="session">${sessionOptions(p.session)}</select></label><label>発表学年<input data-vpfield="grade" maxlength="40" value="${esc(p.grade||'')}"></label><label>発表グループ<input data-vpfield="group" maxlength="40" value="${esc(p.group||'')}"></label><label class="program-content-field">発表内容<input data-vpfield="title" maxlength="160" value="${esc(p.title)}"></label><label>児童生徒名（大豊学園のみ）<input data-vpfield="presenters" maxlength="300" value="${esc(p.presenters||'')}"></label><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button>${programDeleteCheckbox(p)}</div>`}
-function adminOtherProgramRow(p){return `<div class="admin-program-row whole-program-row" data-program="${esc(p.id)}"><label>区分<select data-opfield="session"><option value="afternoon" ${p.session==='afternoon'?'selected':''}>午後（リアクション対象）</option><option value="other" ${p.session!=='afternoon'?'selected':''}>その他（リアクションなし）</option></select></label><label>開始<input type="time" data-opfield="start" value="${esc(p.start)}"></label><label>終了<input type="time" data-opfield="end" value="${esc(p.end)}"></label><label>発表学年<input data-opfield="grade" maxlength="40" placeholder="例：7年生・8年生" value="${esc(p.grade||'')}"></label><label>グループ<input data-opfield="group" maxlength="40" placeholder="例：合同A班" value="${esc(p.group||'')}"></label><label>内容<input data-opfield="title" maxlength="120" value="${esc(p.title)}"></label><label>児童生徒名（大豊学園のみ）<input data-opfield="presenters" maxlength="300" value="${esc(p.presenters||'')}"></label><label>会場<select data-opfield="zoneId">${roomOptions(p.zoneId)}</select></label><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button>${programDeleteCheckbox(p)}</div>`}
-function demoVenuePool(){
- const excluded=/(廊下|階段|トイレ|便所|エレベーター|入口|玄関|駐車)/;
- const eligible=state.zones.filter(z=>!['building','parking'].includes(z.kind));
- const rank=Object.fromEntries(MAPS.map((m,i)=>[m.id,i]));
- const sortZones=a=>a.sort((x,y)=>(rank[x.mapId]??99)-(rank[y.mapId]??99)||String(x.id).localeCompare(String(y.id),'ja'));
- const classroom=sortZones(eligible.filter(z=>z.kind==='classroom'&&!excluded.test(z.name||'')));
- const exhibit=sortZones(eligible.filter(z=>z.kind==='exhibit'&&!excluded.test(z.name||'')));
- const other=sortZones(eligible.filter(z=>!['classroom','exhibit','hall'].includes(z.kind)&&!excluded.test(z.name||'')));
- const hall=sortZones(eligible.filter(z=>z.kind==='hall'&&!excluded.test(z.name||'')));
- const rest=sortZones(eligible.filter(z=>!classroom.includes(z)&&!exhibit.includes(z)&&!other.includes(z)&&!hall.includes(z)));
- return [...classroom,...exhibit,...other,...hall,...rest];
-}
-function demoRoomsForSession(pool,sid,sessionIndex){
- const occupied=new Set(state.programs.filter(p=>!String(p.id).startsWith('demo-')&&p.session===sid&&p.zoneId).map(p=>p.zoneId));
- let available=pool.filter(z=>!occupied.has(z.id));
- if(!available.length)return [];
- // 午前のデモでは体育館を避け、教室・展示会場を優先する。4会場に足りない場合だけホールを補う。
- const noHall=available.filter(z=>z.kind!=='hall');
- if(noHall.length>=4)available=noHall;
- const picked=[];
- const offset=(sessionIndex*4)%available.length;
- for(let i=0;i<available.length&&picked.length<4;i++){
-  const z=available[(offset+i)%available.length];
-  if(!picked.some(x=>x.id===z.id))picked.push(z);
- }
- return picked;
-}
-function demoHallZoneId(pool){
- const named=pool.find(z=>/(体育館|アリーナ|講堂|ホール)/.test(z.name||''));
- const hall=named||pool.find(z=>z.kind==='hall');
- if(hall)return hall.id;
- if(!pool.length)return '';
- return pool.slice().sort((a,b)=>(Number(b.w||0)*Number(b.h||0))-(Number(a.w||0)*Number(a.h||0)))[0].id;
-}
-function demoProgramRows(){
- const pool=demoVenuePool();
- if(!pool.length)return [];
- // 2025年度プログラムのセッション構成を参考にした試作用データ。
- // 発表内容と会場はデモ用に再構成し、最大4会場×4セッションで1〜9年生を確認できるようにする。
- const plan={
-  s1:[
-   {grade:'1年生',group:'A班',title:'学校のすてきを見つけよう',presenters:'山田 はる・田中 そうた'},
-   {grade:'4年生',group:'A班',title:'大豊町の自然を調べよう',presenters:'佐藤 ひなた・小林 りく'},
-   {grade:'6年生',group:'A班',title:'地域の魅力を伝えよう',presenters:'高橋 ゆい・伊藤 けん'},
-   {grade:'9年生',group:'A班',title:'未来の大豊町を考える',presenters:'中村 あおい・松本 れん'}
-  ],
-  s2:[
-   {grade:'3年生',group:'A班',title:'町たんけんで見つけたこと',presenters:'井上 みお・木村 そう'},
-   {grade:'6年生',group:'B班',title:'大豊町の課題とこれから',presenters:'林 さくら・森 はると'},
-   {grade:'7年生',group:'A班',title:'ふるさと大豊の魅力',presenters:'山本 ひかり・藤田 かい'},
-   {grade:'9年生',group:'B班',title:'地域を元気にするアイデア',presenters:'岡田 みなみ・前田 しゅん'}
-  ],
-  s3:[
-   {grade:'2年生',group:'A班',title:'大豊町のすてきな場所',presenters:'橋本 えま・石川 りお'},
-   {grade:'5年生',group:'A班',title:'大豊町の産業を調べよう',presenters:'近藤 なお・清水 こう'},
-   {grade:'8年生',group:'A班',title:'探究学習の成果発表',presenters:'吉田 まい・山口 たいち'},
-   {grade:'7年生・8年生',group:'合同A班',title:'大豊町の魅力を未来へ',presenters:'斎藤 りん・加藤 ゆう・村上 そら'}
-  ],
-  s4:[
-   {grade:'2年生',group:'B班',title:'地域の人に聞いてみよう',presenters:'池田 ひな・阿部 るい'},
-   {grade:'4年生',group:'B班',title:'大豊町の文化を伝えよう',presenters:'西村 ゆな・福田 かなた'},
-   {grade:'5年生',group:'B班',title:'地域を支える仕事',presenters:'太田 みさき・藤井 こうた'},
-   {grade:'8年生',group:'B班',title:'私たちが考える大豊町の未来',presenters:'長谷川 あかり・青木 はやと'}
-  ]
- };
- const rows=[];
- SESSION_IDS.forEach((sid,sessionIndex)=>{
-  const rooms=demoRoomsForSession(pool,sid,sessionIndex);
-  const d=sessionDef(sid);
-  rooms.forEach((room,roomIndex)=>{
-   const item=plan[sid][roomIndex];
-   rows.push({
-    id:`demo-${sid}-${roomIndex+1}`,reactionId:'',session:sid,start:d.start,end:d.end,
-    grade:item.grade,group:item.group,title:item.title,zoneId:room.id,presenters:item.presenters||''
-   });
-  });
- });
- return rows;
-}
-function demoWholeProgramRows(){
- const pool=demoVenuePool();
- const hall=demoHallZoneId(pool);
- const demoNames={
-  'pm01':'鈴木 りこ・中川 けい','pm02':'後期生徒 有志メンバー','pm03':'音楽クラブ メンバー','pm04':'吉田 まい・山口 たいち','pm05':'長谷川 あかり・青木 はやと','pm06':'石井 かな・森本 りょう','pm07':'山本 ひかり・松本 れん','pm08':'高橋 ゆい・藤田 かい','pm09':'斎藤 りん・村上 そら','pm10':'中村 あおい','pm11':'吹奏楽部 メンバー'
- };
- const r=(id,session,start,end,grade,group,title,zoneId='')=>({id:`demo-${id}`,reactionId:'',session,start,end,grade,group,title,zoneId,presenters:demoNames[id]||''});
- return [
-  r('opening','other','08:45','09:05','','','開会行事',hall),
-  r('attraction','other','09:05','09:20','','','アトラクション',hall),
-  r('zenki-choir','other','11:25','11:40','1年生・2年生・3年生・4年生・5年生','','前期合唱「大豊の四季」',hall),
-  r('review','other','11:40','11:50','','','午前の部 講評',hall),
-  r('lunch','other','11:50','12:40','','','昼休み・スライド上映',hall),
-  r('pm-open','other','12:40','12:43','5年生','','午後の部 開始のあいさつ',hall),
-  r('pm01','afternoon','12:43','12:53','4年生','演舞チーム','演舞「寺内太刀踊り」',hall),
-  r('pm02','afternoon','12:53','13:00','6年生・7年生・8年生・9年生','後期生徒','後期合唱「ふるさと」',hall),
-  r('prep01','other','13:00','13:10','','','幕間・ステージ準備',hall),
-  r('pm03','afternoon','13:10','13:17','','音楽クラブ','器楽合奏「残酷な大豊のテーゼ」',hall),
-  r('prep02','other','13:17','13:32','','','幕間・ステージ準備',hall),
-  r('pm04','afternoon','13:32','13:38','8年生','英語発表チーム','英語発表「My Neighbor Totoro」',hall),
-  r('pm05','afternoon','13:38','13:44','8年生','ダンスチーム','ダンス「HIP」',hall),
-  r('pm06','afternoon','13:44','13:50','8年生','歌チーム','歌「地球儀」',hall),
-  r('pm07','afternoon','13:50','13:56','7年生・9年生','合同ステージ','歌・ダンス「スキスキ星人」',hall),
-  r('pm-pta','afternoon','13:56','14:02','','PTAバンド','PTAバンド演奏「大豊のゆず」',hall),
-  r('pm08','afternoon','14:02','14:08','6年生・7年生','合同ステージ','演奏・ダンス「Magnetic」',hall),
-  r('pm09','afternoon','14:08','14:14','7年生・8年生・9年生','合同ステージ','劇・ダンス「アン・・・マン」',hall),
-  r('pm10','afternoon','14:14','14:20','9年生','サックスチーム','サックス演奏「情熱大陸」',hall),
-  r('prep03','other','14:20','14:30','','','幕間・ステージ準備',hall),
-  r('pm11','afternoon','14:30','14:50','','吹奏楽部','吹奏楽メドレー',hall),
-  r('closing','other','14:50','15:00','','','閉会行事',hall)
- ];
-}
-function addDemoPrograms(){
- if(!state.zones.length){alert('先に「会場・配置図」で1か所以上の会場を登録してください。');return;}
- const morning=demoProgramRows();
- if(!morning.length){alert('デモ発表を置ける会場がありません。');return;}
- const whole=demoWholeProgramRows();
- // 以前のデモだけを入れ替える。本番データには触れない。
- state.programs=state.programs.filter(p=>!String(p.id).startsWith('demo-'));
- // 初期状態の仮プログラムが未編集のまま残っている場合だけ除き、デモ表示を分かりやすくする。
- state.programs=state.programs.filter(p=>!(p.id==='p1'&&p.session==='other'&&p.title==='開会行事・アトラクション')&&!(p.id==='p6'&&p.session==='afternoon'&&p.title==='午後のステージ発表（仮）'));
- state.programs.push(...morning,...whole);
- if(morning[0]?.zoneId){
-  adminProgramVenue=morning[0].zoneId;
-  const firstZone=getZone(morning[0].zoneId);
-  if(firstZone)visitorBuilding=getMap(firstZone.mapId).building;
- }
- // 登録直後に場所の反映を確認しやすいよう、同じ端末では下書きを公開画面へ即時プレビューする。
- demoDraftPreview=true;session='s1';visitorSelected='';state=draftState;
- persist();renderAdminPrograms();renderPublic();
- const afternoonCount=whole.filter(p=>p.session==='afternoon').length;
- const msg=byId('demoDataMessage');if(msg)msg.textContent=`2025年度プログラムの流れを参考に、午前${morning.length}件（最大4会場×4セッション）と午後${afternoonCount}件のリアクション対象ステージを含むデモデータを登録しました。1〜9年生、複数グループ、合同発表、架空の児童生徒名を確認できます。この端末では会場案内に即時反映されます。`;
- toast('2025年度プログラム参考のデモデータを登録しました');
-}
-function removeDemoPrograms(){
- const n=state.programs.filter(p=>String(p.id).startsWith('demo-')).length;
- if(!n){const msg=byId('demoDataMessage');if(msg)msg.textContent='削除するデモデータはありません。';return;}
- if(!confirm(`デモ用プログラム${n}件を下書きから削除します。実際に登録した会場や本番プログラムは削除しません。よろしいですか？`))return;
- state.programs=state.programs.filter(p=>!String(p.id).startsWith('demo-'));
- demoDraftPreview=true;state=draftState;
- persist();renderAdminPrograms();renderPublic();
- const msg=byId('demoDataMessage');if(msg)msg.textContent='デモ用プログラムを削除しました。この端末の会場案内にも即時反映しています。Supabaseへ公開済みの場合は、再度公開すると他端末からも消えます。';
- toast('デモデータを削除しました');
-}
+function adminVenueProgramRow(p){return `<div class="venue-program-admin-row" data-program="${esc(p.id)}"><label>区分<select data-vpfield="programKind">${programKindOptions(programKind(p))}</select></label><label>セッション<select data-vpfield="session">${sessionOptions(p.session)}</select></label><label>発表学年（複数可）<input data-vpfield="grade" maxlength="40" placeholder="例：7年生・8年生" value="${esc(p.grade||'')}"></label><label>発表グループ<input data-vpfield="group" maxlength="40" placeholder="例：A班・1班" value="${esc(p.group||'')}"></label><label class="program-content-field">発表内容<input data-vpfield="title" maxlength="160" placeholder="発表内容を入力" value="${esc(p.title)}"></label><label class="program-presenters-field">児童生徒名（大豊学園のみ）<input data-vpfield="presenters" maxlength="300" placeholder="例：山田○○、田中○○" value="${esc(p.presenters||'')}"></label><div class="derived-time">${esc(programTimes(p).start)}〜${esc(programTimes(p).end)}</div><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button>${programDeleteCheckbox(p)}</div>`}
+function adminUnassignedRow(p){return `<div class="venue-program-admin-row legacy" data-program="${esc(p.id)}"><label>区分<select data-vpfield="programKind">${programKindOptions(programKind(p))}</select></label><label>会場<select data-vpfield="zoneId">${roomOptions('')}</select></label><label>セッション<select data-vpfield="session">${sessionOptions(p.session)}</select></label><label>発表学年<input data-vpfield="grade" maxlength="40" value="${esc(p.grade||'')}"></label><label>発表グループ<input data-vpfield="group" maxlength="40" value="${esc(p.group||'')}"></label><label class="program-content-field">発表内容<input data-vpfield="title" maxlength="160" value="${esc(p.title)}"></label><label>児童生徒名（大豊学園のみ）<input data-vpfield="presenters" maxlength="300" value="${esc(p.presenters||'')}"></label><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button>${programDeleteCheckbox(p)}</div>`}
+function adminOtherProgramRow(p){return `<div class="admin-program-row whole-program-row" data-program="${esc(p.id)}"><label>区分<select data-opfield="programKind">${programKindOptions(programKind(p))}</select></label><label>時間帯<select data-opfield="session"><option value="afternoon" ${p.session==='afternoon'?'selected':''}>午後</option><option value="other" ${p.session!=='afternoon'?'selected':''}>午前・その他</option></select></label><label>開始<input type="time" data-opfield="start" value="${esc(p.start)}"></label><label>終了<input type="time" data-opfield="end" value="${esc(p.end)}"></label><label>発表学年<input data-opfield="grade" maxlength="40" placeholder="例：7年生・8年生" value="${esc(p.grade||'')}"></label><label>グループ<input data-opfield="group" maxlength="40" placeholder="例：合同A班" value="${esc(p.group||'')}"></label><label>内容<input data-opfield="title" maxlength="120" value="${esc(p.title)}"></label><label>児童生徒名（大豊学園のみ）<input data-opfield="presenters" maxlength="300" value="${esc(p.presenters||'')}"></label><label>会場<select data-opfield="zoneId">${roomOptions(p.zoneId)}</select></label><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button>${programDeleteCheckbox(p)}</div>`}
 function bindAdminProgramEvents(){
  $$('[data-select-program]').forEach(c=>c.addEventListener('change',()=>{
   if(c.checked)selectedProgramIds.add(c.dataset.selectProgram);else selectedProgramIds.delete(c.dataset.selectProgram);
@@ -1396,12 +1322,12 @@ function bindAdminProgramEvents(){
  byId('downloadProgramXlsx').addEventListener('click',downloadProgramExcel);
  $$('[data-session-setting]').forEach(row=>row.querySelectorAll('[data-session-time]').forEach(input=>input.addEventListener('change',()=>{const id=row.dataset.sessionSetting,start=row.querySelector('[data-session-time="start"]').value,end=row.querySelector('[data-session-time="end"]').value;if(!start||!end||timeNum(start)>=timeNum(end)){alert('開始時刻より後に終了時刻を設定してください。');renderAdminPrograms();return;}state.sessions[id]={...state.sessions[id],label:DEFAULT_SESSIONS[id].label,start,end};syncSessionProgramTimes();persist();renderAdminPrograms();renderPublic();toast(`${sessionLabel(id)}の時間を保存しました`)})));
  byId('programVenueSelect')?.addEventListener('change',e=>{adminProgramVenue=e.target.value;renderAdminPrograms()});
- $$('[data-vpfield]').forEach(el=>el.addEventListener('change',e=>{const row=e.target.closest('[data-program]'),p=state.programs.find(x=>x.id===row.dataset.program);if(!p)return;const field=e.target.dataset.vpfield,old=p[field];p[field]=e.target.value;if(field==='session'){const d=sessionDef(p.session);p.start=d.start;p.end=d.end;}if(hasDuplicateVenueSession(p)){alert('同じ会場の同じセッションには、すでに別の発表が登録されています。');p[field]=old;renderAdminPrograms();return;}if(field==='zoneId'&&p.zoneId)adminProgramVenue=p.zoneId;persist();renderAdminPrograms();renderPublic();toast('発表内容を保存しました')}));
- $$('[data-opfield]').forEach(el=>el.addEventListener('change',e=>{const row=e.target.closest('[data-program]'),p=state.programs.find(x=>x.id===row.dataset.program);if(!p)return;p[e.target.dataset.opfield]=e.target.value;persist();renderPublic();toast('全体プログラムを保存しました')}));
+ $$('[data-vpfield]').forEach(el=>el.addEventListener('change',e=>{const row=e.target.closest('[data-program]'),p=state.programs.find(x=>x.id===row.dataset.program);if(!p)return;const field=e.target.dataset.vpfield,old=p[field];p[field]=e.target.value;if(field==='session'){const d=sessionDef(p.session);p.start=d.start;p.end=d.end;}if(hasDuplicateVenueSession(p)){alert('同じ会場の同じセッションには、すでに別の発表が登録されています。');p[field]=old;renderAdminPrograms();return;}if(field==='zoneId'&&p.zoneId)adminProgramVenue=p.zoneId;if(field==='programKind')syncReactionGroups(state);persist();renderAdminPrograms();renderPublic();toast('発表内容を保存しました')}));
+ $$('[data-opfield]').forEach(el=>el.addEventListener('change',e=>{const row=e.target.closest('[data-program]'),p=state.programs.find(x=>x.id===row.dataset.program);if(!p)return;p[e.target.dataset.opfield]=e.target.value;if(e.target.dataset.opfield==='programKind')syncReactionGroups(state);persist();renderPublic();toast('全体プログラムを保存しました')}));
  $$('[data-del-program]').forEach(el=>el.onclick=()=>{if(!confirm('この発表を削除しますか？'))return;state.programs=state.programs.filter(p=>p.id!==el.dataset.delProgram);persist();renderAdminPrograms();renderPublic()});
- byId('addVenueProgram')?.addEventListener('click',()=>{if(!adminProgramVenue)return;const used=new Set(sessionProgramsForVenue(adminProgramVenue).map(p=>p.session));const sid=SESSION_IDS.find(id=>!used.has(id));if(!sid){alert('この会場にはセッション①〜④がすべて登録されています。');return;}const d=sessionDef(sid);state.programs.push({id:'p'+Date.now(),reactionId:'',session:sid,start:d.start,end:d.end,grade:'',group:'',title:'',zoneId:adminProgramVenue,presenters:''});persist();renderAdminPrograms();renderPublic();toast(`${sessionLabel(sid)}の入力欄を追加しました`)});
- byId('addAfternoonProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'afternoon',start:'13:00',end:'13:20',grade:'',group:'',title:'新しい午後プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('午後プログラムを追加しました')});
- byId('addOtherProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'other',start:'08:30',end:'08:50',grade:'',group:'',title:'新しい全体プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('全体プログラムを追加しました')});
+ byId('addVenueProgram')?.addEventListener('click',()=>{if(!adminProgramVenue)return;const used=new Set(sessionProgramsForVenue(adminProgramVenue).map(p=>p.session));const sid=SESSION_IDS.find(id=>!used.has(id));if(!sid){alert('この会場にはセッション①〜④がすべて登録されています。');return;}const d=sessionDef(sid);state.programs.push({id:'p'+Date.now(),reactionId:'',programKind:'reaction',session:sid,start:d.start,end:d.end,grade:'',group:'',title:'',zoneId:adminProgramVenue,presenters:''});persist();renderAdminPrograms();renderPublic();toast(`${sessionLabel(sid)}の入力欄を追加しました`)});
+ byId('addAfternoonProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',programKind:'none',session:'afternoon',start:'13:00',end:'13:20',grade:'',group:'',title:'新しい午後プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('午後プログラムを追加しました')});
+ byId('addOtherProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',programKind:'none',session:'other',start:'08:30',end:'08:50',grade:'',group:'',title:'新しい全体プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('全体プログラムを追加しました')});
  byId('importProgramCsv')?.addEventListener('click',async()=>{
   const btn=byId('importProgramCsv');if(btn.disabled)return;
   const input=byId('programCsvFile'),msg=byId('programCsvMessage'),file=input?.files?.[0];
@@ -1426,8 +1352,7 @@ function bindAdminProgramEvents(){
   }catch(err){if(msg)msg.textContent=String(err.message||err);alert(String(err.message||err));}
   finally{btn.disabled=false;}
  });
-byId('addDemoData')?.addEventListener('click',addDemoPrograms);
- byId('removeDemoData')?.addEventListener('click',removeDemoPrograms);
+
 }
 function renderBasic(){byId('settingYear').value=state.year;byId('settingDate').value=state.eventDate;byId('settingSlogan').value=state.slogan;byId('reactionDeadline').value=state.reactionDeadline||state.eventDate+'T17:00';byId('internalPasscodeSetting').value=state.internalPasscode||'';
  byId('testEnabled').checked=!!state.test.enabled;byId('testDate').value=state.test.date;byId('testTime').value=state.test.time;byId('testSlider').value=timeNum(state.test.time);byId('testTimeText').textContent=state.test.time;}
@@ -1445,7 +1370,7 @@ function appPublicUrl(){
  const here=(location.protocol==='http:'||location.protocol==='https:')?location.origin+location.pathname:STAMP_BASE_URL;
  return here.endsWith('/')?here:here.replace(/\/[^/]*$/,'/');
 }
-function surveyTargetLabel(v){return ({both:'一般＋大豊学園',public:'一般来場者',internal:'大豊学園のみ'})[v]||'一般＋大豊学園';}
+function surveyTargetLabel(v){return v==='internal'?'大豊学園関係者のみ':'一般公開';}
 // 画像はSupabase StorageではなくアンケートJSONに圧縮データとして保存する（追加SQL不要）。
 const SURVEY_IMAGE_MAX_BYTES=450000;
 const SURVEY_IMAGES_TOTAL_MAX=2300000;
@@ -1476,7 +1401,7 @@ function renderSurveyAdmin(){
  <div class="survey-admin-head"><div><strong>${esc(x.title||`アンケート${i+1}`)}</strong><span>${esc(surveyTargetLabel(x.target))}</span></div><label class="check"><input type="checkbox" data-survey-field="enabled" ${x.enabled!==false?'checked':''}> 表示する</label></div>
  <div class="survey-form-grid">
  <label>アンケート名<input data-survey-field="title" value="${esc(x.title)}" maxlength="80"></label>
- <label>対象<select data-survey-field="target"><option value="both" ${x.target==='both'?'selected':''}>一般＋大豊学園</option><option value="public" ${x.target==='public'?'selected':''}>一般来場者のみ</option><option value="internal" ${x.target==='internal'?'selected':''}>大豊学園のみ</option></select></label>
+ <label>公開範囲<select data-survey-field="target"><option value="both" ${x.target!=='internal'?'selected':''}>一般公開（来場者・大豊学園関係者）</option><option value="internal" ${x.target==='internal'?'selected':''}>大豊学園関係者のみ</option></select></label>
  <label class="survey-span-2">案内文<textarea data-survey-field="message" rows="3" maxlength="500">${esc(x.message)}</textarea></label>
  <label class="survey-span-2">GoogleフォームURL<input data-survey-field="url" type="url" value="${esc(x.url)}" placeholder="https://docs.google.com/forms/..."></label>
  <div class="survey-image-admin"><strong>参考ポスター（任意・1枚）</strong><input type="file" accept="image/jpeg,image/png,image/webp" data-survey-image aria-label="参考ポスター画像を選択"><small>画像は自動縮小して保存。PDFはここでは添付できません。ポスターの画像を指定してください。</small>${x.image?`<img class="survey-image-admin-preview" src="${esc(x.image)}" alt="設定済みの参考ポスター"><button type="button" class="btn light" data-remove-survey-image="${esc(x.id)}">画像を削除する</button>`:'<small>画像は未登録です。</small>'}</div>
@@ -1485,7 +1410,7 @@ function renderSurveyAdmin(){
  <label>表示開始（任意）<input data-survey-field="startAt" type="datetime-local" value="${esc(x.startAt||'')}"></label>
  <label>表示終了（任意）<input data-survey-field="endAt" type="datetime-local" value="${esc(x.endAt||'')}"></label></div>
  <div class="row-actions"><button type="button" class="btn danger" data-delete-survey="${esc(x.id)}">削除</button></div>
- <p class="caption">${x.target==='internal'?'このURLと参考画像は一般公開データには含めません。大豊学園関係者用パスコードで入った人だけに表示します。':'来場者画面では参考画像を拡大でき、Googleフォームをボタンから開けます。'}</p></article>`).join(''):'<div class="editor-card"><p class="muted">アンケートはまだ登録されていません。「＋ アンケートを追加」から必要な数だけ登録してください。</p></div>';
+ <p class="caption">${x.target==='internal'?'このURLと参考画像は一般公開データには含めません。大豊学園関係者用パスコードで入った人だけに表示します。':'一般来場者・大豊学園関係者の両方に表示します。参考画像を拡大でき、Googleフォームを開けます。'}</p></article>`).join(''):'<div class="editor-card"><p class="muted">アンケートはまだ登録されていません。「＋ アンケートを追加」から必要な数だけ登録してください。</p></div>';
  box.querySelectorAll('[data-survey-field]').forEach(el=>el.addEventListener('change',e=>{
   const card=e.target.closest('[data-survey-id]'),item=state.surveys.find(v=>v.id===card?.dataset.surveyId);if(!item)return;
   const field=e.target.dataset.surveyField;item[field]=field==='enabled'?e.target.checked:field==='order'?Number(e.target.value)||1:e.target.value;
