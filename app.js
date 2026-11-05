@@ -977,14 +977,28 @@ async function readProgramExcel(file){
  if(first?.getAttribute('name')!=='プログラム入力')throw Error('「プログラム入力」が先頭タブのOFES専用Excel様式を使用してください。');
  const doc=await loadXml('xl/worksheets/sheet1.xml',3000000);
  let shared=[];
- if(zip.file('xl/sharedStrings.xml')){
-  const sharedDoc=await loadXml('xl/sharedStrings.xml',1500000);
-  shared=[...sharedDoc.getElementsByTagNameNS(ns,'si')].map(si=>[...si.getElementsByTagNameNS(ns,'t')].map(t=>t.textContent||'').join(''));
- }
  const data=doc.getElementsByTagNameNS(ns,'sheetData')[0];
  if(!data)throw Error('「プログラム入力」タブの入力欄が見つかりません。');
- const out=[];
- for(const row of [...data.getElementsByTagNameNS(ns,'row')]){
+  // Excelの <rPh> はセルの読み仮名データで、通常表示の本文には含まれない。
+  // 子孫の <t> を全部結合すると「開会式カイカイシキ」のように誤読するので、
+  // <si>/<is> の直下の <t> と <r> だけを本文として集める。
+  function excelVisibleText(container){
+   if(!container)return '';
+   const parts=[];
+   for(const child of Array.from(container.children)){
+    if(child.localName==='t')parts.push(child.textContent||'');
+    else if(child.localName==='r'){
+     for(const t of Array.from(child.children))if(t.localName==='t')parts.push(t.textContent||'');
+    }
+   }
+   return parts.join('');
+  }
+  if(zip.file('xl/sharedStrings.xml')){
+   const sharedDoc=await loadXml('xl/sharedStrings.xml',1500000);
+   shared=Array.from(sharedDoc.getElementsByTagNameNS(ns,'si')).map(si=>excelVisibleText(si));
+  }
+  const out=[];
+  for(const row of [...data.getElementsByTagNameNS(ns,'row')]){
   const rowNumber=Number(row.getAttribute('r'))||0;
   if(rowNumber<1||rowNumber>301)continue;
   const fields=Array(11).fill('');
@@ -997,7 +1011,7 @@ async function readProgramExcel(file){
    const type=cell.getAttribute('t')||'';
    const raw=cell.getElementsByTagNameNS(ns,'v')[0]?.textContent||'';
    let val=type==='s'?shared[Number(raw)]||'':type==='inlineStr'?
-     [...cell.getElementsByTagNameNS(ns,'t')].map(x=>x.textContent||'').join(''):raw;
+     excelVisibleText(Array.from(cell.children).find(x=>x.localName==='is')):raw;
    if((colIndex===2||colIndex===3||colIndex===9||colIndex===10)&&val!==''&&/^\d*\.\d+$/.test(val)){
     // Excelが時刻を1日の小数値で保存した場合は HH:MM に戻す。
     const minutes=Math.round((Number(val)%1)*1440)%1440;
@@ -1102,6 +1116,28 @@ async function downloadProgramExcel(event){
  }catch(err){console.error(err);alert(`Excel入力様式を作成できませんでした。${err.message||err}`);}
  finally{btn.removeAttribute('aria-disabled');btn.style.pointerEvents='';btn.textContent=old;}
 }
+// 同じ演目を繰り返し取り込まないための厳密な一致キー。
+// 発表学年や発表内容・時刻などが異なるものは別演目として扱う。
+function programIdentityKey(p){
+ const tidy=v=>String(v??'').normalize('NFKC').replace(/\s+/g,' ').trim();
+ const t=programTimes(p);
+ return JSON.stringify([p.session,tidy(p.zoneId),tidy(t.start),tidy(t.end),tidy(p.grade),tidy(p.group),tidy(p.title),tidy(p.presenters)]);
+}
+function duplicateProgramIds(programs=state.programs){
+ const seen=new Set(),ids=[];
+ for(const p of programs){const k=programIdentityKey(p);if(seen.has(k))ids.push(p.id);else seen.add(k);}
+ return ids;
+}
+function removeExactDuplicatePrograms(){
+ if(!editorActive||byId('adminPanel')?.hidden)return;
+ const ids=duplicateProgramIds();
+ if(!ids.length){alert('完全に同じ内容の重複登録は見つかりませんでした。');return;}
+ if(!confirm(`【重複プログラムの整理】\n\n会場・時間帯・学年・グループ・発表内容・児童生徒名が同じプログラム ${ids.length}件を、先に登録した1件を残して削除します。\n\n下書きだけを変更し、Supabaseへの公開は別操作です。\n念のためJSONバックアップを保存してから実行してください。\n\n実行しますか？`))return;
+ const removed=new Set(ids);
+ state.programs=state.programs.filter(p=>!removed.has(p.id));
+ selectedProgramIds.clear();persist();renderAdminPrograms();renderPublic();toast(`重複 ${ids.length}件を下書きから整理しました`);
+}
+
 function parseProgramCsv(text,mode){
  const rows=parseCsvRows(text);const headerAt=rows.findIndex(r=>String(r[0]||'').trim()==='種別');
  if(headerAt<0)throw Error('「種別」から始まる見出し行が見つかりません。OFESのCSV様式を使用してください。');
@@ -1113,6 +1149,8 @@ function parseProgramCsv(text,mode){
  const idx=Object.fromEntries(headers.map((h,i)=>[h,i])),out=[],errors=[];
  const existing=mode==='append'?[...state.programs]:[];
  const seen=new Set(existing.filter(p=>SESSION_IDS.includes(p.session)&&p.zoneId).map(p=>`${p.zoneId}|${p.session}`));
+ const exactKeys=new Set(existing.map(programIdentityKey));
+ let skipped=0;
  for(let ri=headerAt+1;ri<rows.length;ri++){
   const r=rows[ri],first=String(r[0]||'').trim();if(!r.some(x=>String(x||'').trim())||first.startsWith('#'))continue;
   const type=String(r[idx['種別']]||'').trim(),sessionRaw=String(r[idx['セッション']]||'').trim(),start=String(r[idx['開始時刻']]||'').trim(),end=String(r[idx['終了時刻']]||'').trim();
@@ -1127,24 +1165,30 @@ function parseProgramCsv(text,mode){
    if(!session){errors.push(`${line}行目：セッションは①〜④を入力してください。`);continue;}
    if(!zoneId){errors.push(`${line}行目：セッションの会場名が空欄です。`);continue;}
    const key=`${zoneId}|${session}`;
-   if(seen.has(key)){errors.push(`${line}行目：${rawVenue} の ${sessionLabel(session)} はすでに登録されています。`);continue;}
-   seen.add(key);const d=sessionDef(session);
-   out.push({id:`p${Date.now()}-${ri}`,reactionId:'',session,start:d.start,end:d.end,grade,group,title,zoneId,presenters});
+   const d=sessionDef(session);
+   const candidate={id:`p${Date.now()}-${ri}`,reactionId:'',session,start:d.start,end:d.end,grade,group,title,zoneId,presenters};
+   const identity=programIdentityKey(candidate);
+   if(exactKeys.has(identity)){skipped++;continue;}
+   if(seen.has(key)){errors.push(`${line}行目：${rawVenue} の ${sessionLabel(session)} はすでに登録されています（内容が異なります）。`);continue;}
+   seen.add(key);exactKeys.add(identity);out.push(candidate);
   }
   else if(type==='午前'||type==='午後'||type==='その他'){
    // 午前は「セッション以外の午前行事」として、従来のその他と同じ時刻順で扱う。
    session=type==='午後'?'afternoon':'other';
    if(!csvTimeValid(start)||!csvTimeValid(end)){errors.push(`${line}行目：開始時刻・終了時刻を HH:MM で入力してください。`);continue;}
    if(timeNum(end)<=timeNum(start)){errors.push(`${line}行目：終了時刻は開始時刻より後にしてください。`);continue;}
-   out.push({id:`p${Date.now()}-${ri}`,reactionId:'',session,start,end,grade,group,title,zoneId,presenters});
+   const candidate={id:`p${Date.now()}-${ri}`,reactionId:'',session,start,end,grade,group,title,zoneId,presenters};
+   const identity=programIdentityKey(candidate);
+   if(exactKeys.has(identity)){skipped++;continue;}
+   exactKeys.add(identity);out.push(candidate);
   }
   else errors.push(`${line}行目：種別は「セッション」「午前」「午後」「その他」のいずれかを入力してください。`);
  }
  if(errors.length)throw Error(`入力データに修正が必要な箇所があります。\n${errors.slice(0,12).join('\n')}${errors.length>12?`\nほか ${errors.length-12}件`:''}`);
- if(!out.length)throw Error('読み込めるプログラムがありません。');return out;
+ if(!out.length&&!skipped)throw Error('読み込めるプログラムがありません。');return {rows:out,skipped};
 }
 
-// Ver.1.40: Keep checkmarks when switching venue tabs; never persist them as event data.
+// Ver.1.41: Keep checkmarks when switching venue tabs; never persist them as event data.
 let selectedProgramIds=new Set();
 function programDeleteCheckbox(p){
  return `<label class="program-select-control"><input type="checkbox" data-select-program="${esc(p.id)}" ${selectedProgramIds.has(p.id)?'checked':''} aria-label="削除対象に選択：${esc(p.title||'名称未設定')}"/><span>削除対象に選択</span></label>`;
@@ -1180,7 +1224,7 @@ function renderAdminPrograms(){
   <h3>プログラムの一括削除</h3>
   <p class="muted">削除する発表にチェックを付けてください。会場を切り替えても選択は保持されます。「全削除」は<strong>すべての会場・セッション・午後・その他</strong>の発表を対象にします。</p>
   <div class="row-actions"><button type="button" id="selectAllPrograms" class="btn light">全件を選択</button><button type="button" id="clearProgramSelection" class="btn light">選択解除</button><strong id="programSelectionCount" class="program-selection-count">選択中：${selectedProgramIds.size}件／全${state.programs.length}件</strong></div>
-  <div class="row-actions"><button type="button" id="deleteSelectedPrograms" class="btn danger" ${selectedProgramIds.size?'':'disabled'}>選択したものを削除（${selectedProgramIds.size}件）</button><button type="button" id="deleteAllPrograms" class="btn danger" ${state.programs.length?'':'disabled'}>全削除（${state.programs.length}件）</button></div>
+  <div class="row-actions"><button type="button" id="deleteSelectedPrograms" class="btn danger" ${selectedProgramIds.size?'':'disabled'}>選択したものを削除（${selectedProgramIds.size}件）</button><button type="button" id="deleteAllPrograms" class="btn danger" ${state.programs.length?'':'disabled'}>全削除（${state.programs.length}件）</button><button type="button" id="cleanupDuplicatePrograms" class="btn light">重複を確認・整理（${duplicateProgramIds().length}件）</button></div>
   <p class="caption">削除前に件数を表示して確認します。削除するのは下書きで、公開中のプログラムは再公開するまで変わりません。必要な場合は「データ保存」からJSONバックアップを保存してください。</p>
  </div>
  <div class="editor-card program-step-card"><div class="step-title"><span>1</span><div><h3>セッション①〜④の時間帯</h3><p class="muted">ここで設定した時間が、同じセッションを選んだすべての会場に共通で適用されます。</p></div></div>
@@ -1347,6 +1391,7 @@ function bindAdminProgramEvents(){
  byId('clearProgramSelection')?.addEventListener('click',()=>{selectedProgramIds.clear();$$('[data-select-program]').forEach(c=>c.checked=false);updateProgramSelectionControls();});
  byId('deleteSelectedPrograms')?.addEventListener('click',()=>bulkDeletePrograms('selected'));
  byId('deleteAllPrograms')?.addEventListener('click',()=>bulkDeletePrograms('all'));
+ byId('cleanupDuplicatePrograms')?.addEventListener('click',removeExactDuplicatePrograms);
  updateProgramSelectionControls();
  byId('downloadProgramXlsx').addEventListener('click',downloadProgramExcel);
  $$('[data-session-setting]').forEach(row=>row.querySelectorAll('[data-session-time]').forEach(input=>input.addEventListener('change',()=>{const id=row.dataset.sessionSetting,start=row.querySelector('[data-session-time="start"]').value,end=row.querySelector('[data-session-time="end"]').value;if(!start||!end||timeNum(start)>=timeNum(end)){alert('開始時刻より後に終了時刻を設定してください。');renderAdminPrograms();return;}state.sessions[id]={...state.sessions[id],label:DEFAULT_SESSIONS[id].label,start,end};syncSessionProgramTimes();persist();renderAdminPrograms();renderPublic();toast(`${sessionLabel(id)}の時間を保存しました`)})));
@@ -1358,9 +1403,29 @@ function bindAdminProgramEvents(){
  byId('addAfternoonProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'afternoon',start:'13:00',end:'13:20',grade:'',group:'',title:'新しい午後プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('午後プログラムを追加しました')});
  byId('addOtherProgram')?.addEventListener('click',()=>{state.programs.push({id:'p'+Date.now(),reactionId:'',session:'other',start:'08:30',end:'08:50',grade:'',group:'',title:'新しい全体プログラム',zoneId:'',presenters:''});persist();renderAdminPrograms();renderPublic();toast('全体プログラムを追加しました')});
  byId('importProgramCsv')?.addEventListener('click',async()=>{
- const input=byId('programCsvFile'),msg=byId('programCsvMessage'),file=input?.files?.[0];if(!file){if(msg)msg.textContent='ExcelまたはCSVファイルを選んでください。';return;}
- const mode=byId('programCsvMode')?.value||'append';try{if(msg)msg.textContent='Excel／CSVを確認しています…';const text=await readProgramImportFile(file);const imported=parseProgramCsv(text,mode);if(mode==='replace'&&!confirm(`現在のプログラム ${state.programs.length}件を削除し、ファイルの ${imported.length}件に置き換えます。よろしいですか？`)){if(msg)msg.textContent='読み込みをキャンセルしました。';return;}state.programs=mode==='replace'?imported:[...state.programs,...imported];syncReactionGroups(state);persist();renderAdminPrograms();renderPublic();if(msg)msg.textContent=`Excel／CSVから ${imported.length}件を${mode==='replace'?'読み込み、現在のプログラムを置き換え':'追加'}ました。Supabaseへ公開する前に内容を確認してください。`;toast('プログラムを読み込みました');input.value='';}catch(err){if(msg)msg.textContent=String(err.message||err);alert(String(err.message||err));}
-});
+  const btn=byId('importProgramCsv');if(btn.disabled)return;
+  const input=byId('programCsvFile'),msg=byId('programCsvMessage'),file=input?.files?.[0];
+  if(!file){if(msg)msg.textContent='ExcelまたはCSVファイルを選んでください。';return;}
+  const mode=byId('programCsvMode')?.value||'replace';btn.disabled=true;
+  try{
+   if(msg)msg.textContent='Excel／CSVを確認しています…';
+   const text=await readProgramImportFile(file);
+   const result=parseProgramCsv(text,mode),imported=result.rows,skipped=result.skipped;
+   if(!imported.length){if(msg)msg.textContent=`同じ内容のプログラム ${skipped}件は登録済みです。新しい登録はありません。`;return;}
+   if(mode==='replace'){
+    if(!confirm(`【プログラムの置き換え】\n現在の下書き ${state.programs.length}件を、新しい ${imported.length}件に置き換えます。\n置き換えると従来の下書きが消えるため、必要に応じてJSONバックアップしてください。\nよろしいですか？`)){
+     if(msg)msg.textContent='読み込みをキャンセルしました。';return;
+    }
+   }else if(!confirm(`【プログラムの追加】\n新規 ${imported.length}件を下書きに追加します。\n完全一致による重複 ${skipped}件は登録しません。よろしいですか？`)){
+    if(msg)msg.textContent='読み込みをキャンセルしました。';return;
+   }
+   state.programs=mode==='replace'?imported:[...state.programs,...imported];
+   syncReactionGroups(state);persist();renderAdminPrograms();renderPublic();
+   if(msg)msg.textContent=`Excel／CSVから ${imported.length}件を${mode==='replace'?'読み込み、現在のプログラムを置き換え':'追加'}ました。重複 ${skipped}件は登録しませんでした。Supabaseへ公開する前に内容を確認してください。`;
+   toast('プログラムを読み込みました');input.value='';
+  }catch(err){if(msg)msg.textContent=String(err.message||err);alert(String(err.message||err));}
+  finally{btn.disabled=false;}
+ });
 byId('addDemoData')?.addEventListener('click',addDemoPrograms);
  byId('removeDemoData')?.addEventListener('click',removeDemoPrograms);
 }
