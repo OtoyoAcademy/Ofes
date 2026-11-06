@@ -274,3 +274,11 @@
   height:auto;
   flex:none;
 }
+
+/* Ver.1.43: 編集元データ（下書きと公開済み）の表示 */
+.program-draft-card{border:1px solid #bdd6cb;background:#f6faf8}
+.program-draft-warning{border:2px solid #d4a84c;background:#fffaf0}
+.program-draft-warning p{color:#614817}
+.program-edit-counts{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+.program-edit-counts span{display:inline-block;background:#fff;border:1px solid #d5ded9;border-radius:8px;padding:9px 13px;color:#24463b}
+.program-edit-counts strong{font-size:1.12em;color:#175a40}

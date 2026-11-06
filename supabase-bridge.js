@@ -392,6 +392,12 @@ publishButton?.addEventListener('click',async()=>{
   if(!isAdmin()||isBusy||!cloudLoaded||cloudError)return;const payload=window.OFESCloud?.exportPublished?.();if(!payload)return status(publishMessage,'下書きが取得できません。画面を再読み込みしてください。','error');
   const before=publishedData?`現在の公開データ（会場${publishedData.zones?.length||0}か所）を上書きします。`:'初めての公開です。';
   const warning=publishedData?.zones?.length>payload.zones.length?'\n【注意】現在の公開会場数より下書きの会場数が少なくなっています。ほかの端末で教室登録を進めている場合は、公開しないでください。\n':'';
+  // 公開中にプログラムがあるのに下書き0件で公開すると、来場者の一覧が消える。
+  // 全件削除の意図が明確な場合だけ許可する。
+  if((publishedData?.programs?.length||0)>0 && payload.programs.length===0){
+   const phrase=prompt(`【重要】公開中のプログラム ${publishedData.programs.length}件がすべて消えます。\n\n下書き0件のまま公開しようとしています。編集用の下書きへの読み込み忘れではありませんか？\n\n本当に全プログラムを空にして公開する場合のみ、「0件で公開」と入力してください。`);
+   if(phrase!=='0件で公開')return;
+  }
   if(!confirm(`${before}\n${warning}\n年度：${payload.year}\n会場：${payload.zones.length}か所\nプログラム：${payload.programs.length}件\n受付終了：${payload.reactionDeadline}（日本時間）\n\nこの内容を来場者向けに公開してよろしいですか？`))return;
   isBusy=true;setUiState();let backupPoint=null;
   try{

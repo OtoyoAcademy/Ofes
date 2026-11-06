@@ -11,13 +11,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="OFES">
-  <link rel="stylesheet" href="style.css?v=141">
+  <link rel="stylesheet" href="style.css?v=143">
   <script defer src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="assets/vendor/jszip.min.js"></script>
-  <script defer src="app.js?v=142"></script>
-  <script defer src="photo-collage.js?v=142"></script>
+  <script defer src="app.js?v=143"></script>
+  <script defer src="photo-collage.js?v=143"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script type="module" src="supabase-bridge.js?v=142"></script>
+  <script type="module" src="supabase-bridge.js?v=143"></script>
 </head>
 <body>
 <div id="entryGate" class="entry-gate" hidden>
@@ -230,7 +230,7 @@
   </div>
 
   <div class="admin-page" id="admin-program">
-    <div class="admin-intro"><strong>入力は2段階です。</strong> ①セッション①〜④の時間帯を設定 → ②会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。同じ時間帯を会場ごとに繰り返し入力する必要はありません。<p class="caption"><strong>児童生徒名：</strong>一般来場者には表示されません。「大豊学園」入口から年度用パスコードで入った関係者と管理者だけに表示します。個人名は必ず専用の「児童生徒名」欄へ入力してください。</p><p class="caption"><strong>リアクション区分：</strong>「リアクション対象」「リアクションなし」「有志発表（リアクション対象）」から発表ごとに指定します。有志発表だけが折りたたまれ、その他の午後行事は個別表示されます。<br><strong>公開：</strong>変更はこのブラウザの下書きに保存されます。内容を確認後、「データ保存」から「Supabaseへ公開」を押すと来場者へ反映されます。</p></div>
+    <div class="admin-intro"><strong>公開済みのプログラムを変更する場合は、下の「公開中のデータを編集用に読み込む」を押してください。</strong> 保存済みのプログラムを下書きへ読み込んでから、追加・修正・削除ができます。<p><strong>入力は2段階です。</strong> ①セッション①〜④の時間帯を設定 → ②会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。同じ時間帯を会場ごとに繰り返し入力する必要はありません。</p><p class="caption"><strong>児童生徒名：</strong>一般来場者には表示されません。「大豊学園」入口から年度用パスコードで入った関係者と管理者だけに表示します。個人名は必ず専用の「児童生徒名」欄へ入力してください。</p><p class="caption"><strong>リアクション区分：</strong>「リアクション対象」「リアクションなし」「有志発表（リアクション対象）」から発表ごとに指定します。有志発表だけが折りたたまれ、その他の午後行事は個別表示されます。<br><strong>公開：</strong>変更はこのブラウザの下書きに保存されます。内容を確認後、「データ保存」から「Supabaseへ公開」を押すと来場者へ反映されます。</p></div>
     <div class="editor-card program-csv-card">
       <h3>Excelでプログラムを一括入力</h3>
       <p class="muted"><strong>Excel形式（.xlsx）が新しい入力様式です。</strong>「プログラム入力」「入力説明」「選択肢設定」の3タブがあります。<strong>ダウンロード時点で「会場・配置図」に登録済みの会場名を選択肢へ自動反映</strong>します。入力タブでは<strong>会場IDではなく場所名</strong>をプルダウンで選べます。セッション①〜④を選ぶと、<strong>その時点で設定されている開始・終了時刻がC・D列へ自動表示</strong>されます。発表学年には「保育所」「実行委員」「吹奏楽部」「音楽部」も選べます。セッション以外の時刻はJ・K列に入力してください。<strong>L列「リアクション区分」で3種類から選択できます（未選択はセッション＝対象、それ以外＝対象外）。</strong>入力後はExcelのまま読み込めます。</p>

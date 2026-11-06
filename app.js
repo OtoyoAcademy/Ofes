@@ -211,6 +211,8 @@ function acceptPublished(doc){
   publishedState=doc?validData({...doc,test:{enabled:false,date:doc.eventDate||DEFAULT_DATA.eventDate,time:'09:25'}}):null;
   cloudAvailable=!!publishedState;
   if(!editorActive && !demoDraftPreview){state=publishedState||draftState;renderPublic();}
+  // 公開内容が後から届いた場合も、編集画面の件数と読込ボタンを更新する。
+  if(editorActive && !byId('adminPanel')?.hidden)renderAdminPrograms();
  }catch(e){console.error('公開データの形式が不正です',e);toast('Supabaseの公開データを読み込めませんでした。');}
 }
 function switchDraft(){
@@ -231,7 +233,16 @@ window.OFESCloud={
   publishedSummary:()=>({exists:cloudAvailable,year:publishedState?.year,zones:publishedState?.zones.length||0,programs:publishedState?.programs.length||0}),
   importPublishedAsDraft:()=>{
    if(!publishedState)throw Error('Supabaseにはまだ公開データがありません。');
-   draftState=clone(publishedState);applyAdminInternalToDraft();state=draftState;persist();editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
+   // 公開データには保存していない端末専用設定・既存の非公開情報は可能な限り維持する。
+   const previous=draftState;
+   const oldNames=new Map((previous.programs||[]).filter(p=>p.presenters).map(p=>[p.id,p.presenters]));
+   const oldInternalSurveys=(previous.surveys||[]).filter(s=>s.target==='internal');
+   draftState=clone(publishedState);
+   draftState.internalPasscode=String(previous.internalPasscode||'');
+   draftState.test=clone(previous.test||DEFAULT_DATA.test);
+   for(const p of draftState.programs){if(!p.presenters&&oldNames.has(p.id))p.presenters=oldNames.get(p.id);}
+   if(oldInternalSurveys.length){const byId=new Map(draftState.surveys.map(s=>[s.id,s]));oldInternalSurveys.forEach(s=>byId.set(s.id,s));draftState.surveys=[...byId.values()];}
+   applyAdminInternalToDraft();state=draftState;persist();selectedProgramIds.clear();editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
    renderAdmin();renderPublic();toast('Supabaseの公開データを編集用に読み込みました');
   }
 };
@@ -1281,6 +1292,18 @@ function bulkDeletePrograms(mode){
  selectedProgramIds.clear();
  persist();renderAdminPrograms();renderPublic();toast(`下書きから${ids.size}件のプログラムを削除しました`);
 }
+// Ver.1.43: 公開済みプログラムとローカル下書きを明確に区別し、編集画面から再読込できる。
+function loadPublishedProgramsForEditing(){
+ const cloud=publishedState;
+ if(!cloud){alert('公開データをまだ取得できていません。ネットワークを確認してページを再読み込みしてください。');return;}
+ const localCount=draftState.programs?.length||0,cloudCount=cloud.programs?.length||0;
+ const message=`【公開中のデータを編集用に読み込む】\n\nSupabaseで公開中：${cloudCount}件（会場${cloud.zones?.length||0}か所）\nこのブラウザの下書き：${localCount}件（会場${draftState.zones?.length||0}か所）\n\n公開中の会場・プログラム・アンケートなどを編集用の下書きへ読み込みます。\n\n現在のブラウザの未公開の変更は上書きされます。必要な場合は先に「データ保存」でJSONバックアップを保存してください。\n\n読み込みますか？`;
+ if(!confirm(message))return;
+ try{
+  window.OFESCloud.importPublishedAsDraft();
+  toast(`公開中のプログラム${cloudCount}件を編集用に読み込みました。変更後は「データ保存」から再公開してください。`);
+ }catch(err){alert(`公開データを読み込めませんでした：${err.message||err}`);}
+}
 function renderAdminPrograms(){
  if(!adminProgramVenue || !state.zones.some(z=>z.id===adminProgramVenue))adminProgramVenue=state.zones[0]?.id||'';
  selectedProgramIds=new Set([...selectedProgramIds].filter(id=>state.programs.some(p=>p.id===id)));
@@ -1288,7 +1311,20 @@ function renderAdminPrograms(){
  const venuePrograms=selectedZone?sessionProgramsForVenue(selectedZone.id):[];
  const unassigned=orderedPrograms().filter(p=>!p.zoneId&&SESSION_IDS.includes(p.session));
  const other=orderedPrograms().filter(p=>!SESSION_IDS.includes(p.session));
+ const publishedCount=publishedState?.programs?.length;
+ const currentCount=state.programs.length;
+ const hasPublished=!!publishedState;
+ const differentCounts=hasPublished && publishedCount!==currentCount;
  byId('adminPrograms').innerHTML=`
+ <div class="editor-card program-draft-card ${hasPublished&&currentCount===0&&publishedCount>0?'program-draft-warning':''}">
+  <h3>プログラムの編集・追加・削除</h3>
+  <div class="program-edit-counts"><span>このブラウザの下書き：<strong>${currentCount}件</strong></span><span>Supabaseで公開中：<strong>${hasPublished?publishedCount+'件':'確認中'}</strong></span></div>
+  ${hasPublished&&currentCount===0&&publishedCount>0?'<p><strong>公開中のプログラムは残っています。</strong>現在の下書きは0件です。下のボタンから公開データを読み込むと、各発表を修正・追加・削除できます。</p>':
+    hasPublished&&differentCounts?'<p class="muted">公開中と下書きの件数が異なります。未公開の変更がある場合は、読み込み前にバックアップしてください。</p>':
+    '<p class="muted">下書きの各発表はこの画面で変更できます。変更した内容は「データ保存」から再公開するまで来場者画面へ反映されません。</p>'}
+  <div class="row-actions"><button type="button" id="programLoadPublished" class="btn ${hasPublished&&currentCount===0&&publishedCount>0?'primary':'light'}" ${hasPublished?'':'disabled'}>公開中のデータを編集用に読み込む${hasPublished?'（'+publishedCount+'件）':''}</button></div>
+  <p class="caption">再読み込みは現在の下書きを置き換えます。未公開の編集がある場合は「データ保存」からJSONバックアップを保存してください。読み込み後、会場を選んで各演目を修正するか、下の「午後・その他」の欄で全体プログラムを編集できます。</p>
+ </div>
  <div class="editor-card program-bulk-card">
   <h3>プログラムの一括削除</h3>
   <p class="muted">削除する発表にチェックを付けてください。会場を切り替えても選択は保持されます。「全削除」は<strong>すべての会場・セッション・午後・その他</strong>の発表を対象にします。</p>
@@ -1309,6 +1345,7 @@ function adminVenueProgramRow(p){return `<div class="venue-program-admin-row" da
 function adminUnassignedRow(p){return `<div class="venue-program-admin-row legacy" data-program="${esc(p.id)}"><label>区分<select data-vpfield="programKind">${programKindOptions(programKind(p))}</select></label><label>会場<select data-vpfield="zoneId">${roomOptions('')}</select></label><label>セッション<select data-vpfield="session">${sessionOptions(p.session)}</select></label><label>発表学年<input data-vpfield="grade" maxlength="40" value="${esc(p.grade||'')}"></label><label>発表グループ<input data-vpfield="group" maxlength="40" value="${esc(p.group||'')}"></label><label class="program-content-field">発表内容<input data-vpfield="title" maxlength="160" value="${esc(p.title)}"></label><label>児童生徒名（大豊学園のみ）<input data-vpfield="presenters" maxlength="300" value="${esc(p.presenters||'')}"></label><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button>${programDeleteCheckbox(p)}</div>`}
 function adminOtherProgramRow(p){return `<div class="admin-program-row whole-program-row" data-program="${esc(p.id)}"><label>区分<select data-opfield="programKind">${programKindOptions(programKind(p))}</select></label><label>時間帯<select data-opfield="session"><option value="afternoon" ${p.session==='afternoon'?'selected':''}>午後</option><option value="other" ${p.session!=='afternoon'?'selected':''}>午前・その他</option></select></label><label>開始<input type="time" data-opfield="start" value="${esc(p.start)}"></label><label>終了<input type="time" data-opfield="end" value="${esc(p.end)}"></label><label>発表学年<input data-opfield="grade" maxlength="40" placeholder="例：7年生・8年生" value="${esc(p.grade||'')}"></label><label>グループ<input data-opfield="group" maxlength="40" placeholder="例：合同A班" value="${esc(p.group||'')}"></label><label>内容<input data-opfield="title" maxlength="120" value="${esc(p.title)}"></label><label>児童生徒名（大豊学園のみ）<input data-opfield="presenters" maxlength="300" value="${esc(p.presenters||'')}"></label><label>会場<select data-opfield="zoneId">${roomOptions(p.zoneId)}</select></label><button type="button" class="btn danger" data-del-program="${esc(p.id)}">削除</button>${programDeleteCheckbox(p)}</div>`}
 function bindAdminProgramEvents(){
+ byId('programLoadPublished')?.addEventListener('click',loadPublishedProgramsForEditing);
  $$('[data-select-program]').forEach(c=>c.addEventListener('change',()=>{
   if(c.checked)selectedProgramIds.add(c.dataset.selectProgram);else selectedProgramIds.delete(c.dataset.selectProgram);
   updateProgramSelectionControls();
