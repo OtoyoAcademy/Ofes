@@ -295,7 +295,19 @@ function renderSurveys(){const panel=byId('surveyPanel'),cards=byId('surveyCards
 byId('closeSurveyImage')?.addEventListener('click',()=>{byId('surveyImageModal').hidden=true;byId('surveyImageLarge').removeAttribute('src');});
 byId('surveyImageModal')?.addEventListener('click',e=>{if(e.target.id==='surveyImageModal')byId('closeSurveyImage').click();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!byId('surveyImageModal').hidden)byId('closeSurveyImage').click();});
+// 折りたたみの開閉状態は30秒ごとの自動更新でも維持する。
+// セッションと有志発表の両方で同じ仕組みを使用する。
+const programFoldStates=new Map();
+function saveProgramFoldStates(){
+ const list=byId('programList');
+ if(!list)return;
+ list.querySelectorAll('details[data-fold-key]').forEach(el=>programFoldStates.set(el.dataset.foldKey,el.open));
+}
+function programGroupOpen(key,isLive){
+ return programFoldStates.has(key)?programFoldStates.get(key):isLive;
+}
 function renderProgram(){
+ saveProgramFoldStates();
  const filteredOrdered=orderedPrograms();
  const v=viewTime(),active=activePrograms();
  let text='';
@@ -311,10 +323,10 @@ function renderProgram(){
  // セッションは時間帯ごと。有志発表だけを独立して折りたたむ。その他の午後行事は個別表示。
  for(const p of filteredOrdered.filter(p=>!SESSION_IDS.includes(p.session) && programKind(p)!=='volunteer')){const pt=programTimes(p);units.push({type:'single',start:pt.start,p});}
  for(const sid of SESSION_IDS){const ps=filteredOrdered.filter(p=>p.session===sid&&programKind(p)!=='volunteer');if(ps.length){const d=sessionDef(sid);units.push({type:'session',start:d.start,sid,programs:ps});}}
- const afternoonPrograms=filteredOrdered.filter(p=>programKind(p)==='volunteer');
- if(afternoonPrograms.length){
-  const firstVolunteer=afternoonPrograms.reduce((a,b)=>timeNum(programTimes(a).start)<=timeNum(programTimes(b).start)?a:b);
-  units.push({type:'volunteer-group',start:programTimes(firstVolunteer).start,programs:afternoonPrograms});
+ const volunteerPrograms=filteredOrdered.filter(p=>programKind(p)==='volunteer');
+ if(volunteerPrograms.length){
+  const firstVolunteer=volunteerPrograms.reduce((a,b)=>timeNum(programTimes(a).start)<=timeNum(programTimes(b).start)?a:b);
+  units.push({type:'volunteer-group',start:programTimes(firstVolunteer).start,programs:volunteerPrograms});
  }
  units.sort((a,b)=>timeNum(a.start)-timeNum(b.start)||String(a.sid||a.p?.id||a.type||'').localeCompare(String(b.sid||b.p?.id||b.type||'')));
  if(!units.length){
@@ -327,7 +339,7 @@ function renderProgram(){
    const statuses=unit.programs.map(programStatus);
    const st=statuses.some(x=>x.key==='live')?{key:'live',label:'発表中'}:(statuses.every(x=>x.key==='ended')?{key:'ended',label:'終了しました'}:{key:'upcoming',label:'発表予定'});
    const items=unit.programs.slice().sort((a,b)=>String(roomLabel(a)).localeCompare(String(roomLabel(b)))).map(p=>`<div class="session-program-item"><div class="session-program-main"><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`).join('');
-   return `<details class="program-session-group ${st.key==='live'?'on':''}" ${st.key==='live'?'open':''}><summary class="program-session-summary"><span class="time">${esc(d.start)}</span><span class="session-summary-main"><strong>${esc(d.label)}</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(d.start)}〜${esc(d.end)}　${unit.programs.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
+   return `<details data-fold-key="session-${esc(unit.sid)}" class="program-session-group ${st.key==='live'?'on':''}" ${programGroupOpen(`session-${unit.sid}`,st.key==='live')?'open':''}><summary class="program-session-summary"><span class="time">${esc(d.start)}</span><span class="session-summary-main"><strong>${esc(d.label)}</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(d.start)}〜${esc(d.end)}　${unit.programs.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
   }
   if(unit.type==='volunteer-group'){
    const ps=unit.programs.slice().sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||String(a.id).localeCompare(String(b.id)));
@@ -336,7 +348,7 @@ function renderProgram(){
    const allEnded=ps.every(p=>programStatus(p).key==='ended');
    const st=anyLive?{key:'live',label:'発表中'}:(allEnded?{key:'ended',label:'終了しました'}:{key:'upcoming',label:'発表予定'});
    const items=ps.map(p=>{const pt=programTimes(p),pst=programStatus(p);return `<div class="session-program-item"><div class="session-program-main"><div class="afternoon-program-time">${esc(pt.start)}〜${esc(pt.end)} <span class="program-status status-${pst.key}">${pst.label}</span></div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`}).join('');
-   return `<details class="program-session-group afternoon-program-group ${st.key==='live'?'on':''}" ${st.key==='live'?'open':''}><summary class="program-session-summary"><span class="time">${esc(first.start)}</span><span class="session-summary-main"><strong>有志発表</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(first.start)}〜${esc(last.end)}　${ps.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
+   return `<details data-fold-key="volunteer" class="program-session-group afternoon-program-group ${st.key==='live'?'on':''}" ${programGroupOpen('volunteer',st.key==='live')?'open':''}><summary class="program-session-summary"><span class="time">${esc(first.start)}</span><span class="session-summary-main"><strong>有志発表</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(first.start)}〜${esc(last.end)}　${ps.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
   }
   const p=unit.p,pt=programTimes(p),st=programStatus(p);
   return `<div class="program-row ${st.key==='live'?'on':''}"><div class="time">${esc(pt.start)}</div><div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<span class="program-status status-${st.key}">${st.label}</span><div class="where">${esc(sessionLabel(p.session))}　${esc(pt.start)}〜${esc(pt.end)}　${esc(roomLabel(p))} <button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>${reactionsHtml(p)}</div></div>`;
