@@ -24,6 +24,97 @@ const publicationBackupSummary = el('publicationBackupSummary');
 const publicationBackupMessage = el('publicationBackupMessage');
 const adminEmail = el('supabaseAdminEmail');
 const adminPassword = el('supabaseAdminPassword');
+// Ver.1.43: password reset independent from the local admin screen lock.
+const recoveryOverlay = el('ofesRecoveryOverlay');
+const recoveryForm = el('ofesRecoveryForm');
+const recoveryStatus = el('ofesRecoveryStatus');
+const recoverySubmit = el('ofesRecoverySubmit');
+const recoverySendButton = el('ofesSendRecovery');
+const recoveryRequestStatus = el('ofesRecoveryRequestStatus');
+const wantsRecovery = new URLSearchParams(window.location.search).get('ofes-reset-password') === '1'
+  || new URLSearchParams(window.location.hash.replace(/^#/, '')).get('type') === 'recovery';
+let recoveryReady = false;
+function setRecoveryStatus(message, error=false) {
+  if (!recoveryStatus) return;
+  recoveryStatus.textContent = message;
+  recoveryStatus.classList.toggle('error', !!error);
+}
+function showRecovery() {
+  recoveryReady = true;
+  if (recoveryOverlay) recoveryOverlay.hidden = false;
+  if (recoveryForm) recoveryForm.hidden = false;
+  setRecoveryStatus('認証できました。新しいパスワードを入力してください。');
+}
+function recoveryRedirectUrl() {
+  // Exact URL must be registered in Supabase Authentication -> Redirect URLs.
+  const url = new URL('./', window.location.href);
+  url.search = '?ofes-reset-password=1';
+  url.hash = '';
+  if (url.protocol !== 'https:') throw Error('公開中のOFES（HTTPS）から操作してください。');
+  return url.toString();
+}
+function cleanRecoveryUrl() {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('ofes-reset-password');
+    url.hash = '';
+    window.history.replaceState({}, '', url.pathname + url.search);
+  } catch (error) { console.warn('recovery URL cleanup', error); }
+}
+if (wantsRecovery) {
+  if (recoveryOverlay) recoveryOverlay.hidden = false;
+  setRecoveryStatus('再設定リンクを認証しています。リンクが無効・期限切れの場合は、管理者画面から再送信してください。');
+}
+if (recoverySendButton) recoverySendButton.disabled = false;
+recoverySendButton?.addEventListener('click', async () => {
+  const email = String(adminEmail?.value || '').trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (recoveryRequestStatus) recoveryRequestStatus.textContent = '先に管理者メールアドレスを正しく入力してください。';
+    return;
+  }
+  if (!supabase) {
+    if (recoveryRequestStatus) recoveryRequestStatus.textContent = 'Supabaseの初期化が完了していません。';
+    return;
+  }
+  recoverySendButton.disabled = true;
+  if (recoveryRequestStatus) recoveryRequestStatus.textContent = '再設定メールを送信しています…';
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {redirectTo: recoveryRedirectUrl()});
+    if (error) throw error;
+    if (recoveryRequestStatus) recoveryRequestStatus.textContent = '再設定メールの送信を受け付けました。メール内のリンクを開いてください。届かない場合は迷惑メールも確認してください。';
+  } catch (error) {
+    if (recoveryRequestStatus) recoveryRequestStatus.textContent = `送信できませんでした：${errorText(error)}`;
+  } finally { recoverySendButton.disabled = false; }
+});
+recoveryForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!recoveryReady || !supabase) {
+    setRecoveryStatus('再設定リンクの認証が完了していません。メール内のリンクから開き直してください。', true);
+    return;
+  }
+  const next = el('ofesRecoveryPassword')?.value || '';
+  const confirm = el('ofesRecoveryConfirm')?.value || '';
+  if (next.length < 12) { setRecoveryStatus('新しいパスワードは12文字以上で入力してください。', true); return; }
+  if (next !== confirm) { setRecoveryStatus('確認用パスワードが一致しません。', true); return; }
+  recoverySubmit.disabled = true;
+  setRecoveryStatus('新しいパスワードを保存しています…');
+  try {
+    const { error } = await supabase.auth.updateUser({password: next});
+    if (error) throw error;
+    recoveryReady = false;
+    el('ofesRecoveryPassword').value = '';
+    el('ofesRecoveryConfirm').value = '';
+    recoveryForm.hidden = true;
+    setRecoveryStatus('パスワードを変更しました。OFESに戻り、別のシークレットウィンドウで新しいパスワードを使ってログインを確認してください。');
+    cleanRecoveryUrl();
+  } catch (error) { setRecoveryStatus(`変更できませんでした：${errorText(error)}`, true); }
+  finally { recoverySubmit.disabled = false; }
+});
+el('ofesRecoveryClose')?.addEventListener('click', () => {
+  if (recoveryOverlay) recoveryOverlay.hidden = true;
+  if (recoveryForm) recoveryForm.hidden = true;
+  cleanRecoveryUrl();
+});
 
 let supabase = null;
 let isLoggedIn = false;
@@ -392,12 +483,6 @@ publishButton?.addEventListener('click',async()=>{
   if(!isAdmin()||isBusy||!cloudLoaded||cloudError)return;const payload=window.OFESCloud?.exportPublished?.();if(!payload)return status(publishMessage,'下書きが取得できません。画面を再読み込みしてください。','error');
   const before=publishedData?`現在の公開データ（会場${publishedData.zones?.length||0}か所）を上書きします。`:'初めての公開です。';
   const warning=publishedData?.zones?.length>payload.zones.length?'\n【注意】現在の公開会場数より下書きの会場数が少なくなっています。ほかの端末で教室登録を進めている場合は、公開しないでください。\n':'';
-  // 公開中にプログラムがあるのに下書き0件で公開すると、来場者の一覧が消える。
-  // 全件削除の意図が明確な場合だけ許可する。
-  if((publishedData?.programs?.length||0)>0 && payload.programs.length===0){
-   const phrase=prompt(`【重要】公開中のプログラム ${publishedData.programs.length}件がすべて消えます。\n\n下書き0件のまま公開しようとしています。編集用の下書きへの読み込み忘れではありませんか？\n\n本当に全プログラムを空にして公開する場合のみ、「0件で公開」と入力してください。`);
-   if(phrase!=='0件で公開')return;
-  }
   if(!confirm(`${before}\n${warning}\n年度：${payload.year}\n会場：${payload.zones.length}か所\nプログラム：${payload.programs.length}件\n受付終了：${payload.reactionDeadline}（日本時間）\n\nこの内容を来場者向けに公開してよろしいですか？`))return;
   isBusy=true;setUiState();let backupPoint=null;
   try{
@@ -432,8 +517,23 @@ try{
   if(!configured())throw Error('supabase-config.js の Project URL / Publishable key が未設定です。');
   supabase=createClient(supabaseConfig.url,supabaseConfig.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});installExtendedApis();
   status(sdkStatus,'接続準備完了（Supabase）','ok');status(authStatus,'ログイン状態を確認中…','loading');status(authMessage,'管理者はメールアドレスとパスワードでログインします。');setUiState();
+  // Subscribe before network requests: PASSWORD_RECOVERY can fire during SDK initialization.
+  const { data:{ subscription } }=supabase.auth.onAuthStateChange((event,session)=>{
+    if(event === 'PASSWORD_RECOVERY') showRecovery();
+    // Async supabase calls in the auth callback itself can deadlock; defer UI/RLS refresh.
+    setTimeout(()=>{
+      refreshSessionUi(session?.user||null).catch(console.warn);
+      restoreCachedReactions().catch(console.warn);
+    },0);
+  });
   await fetchPublished();subscribePublished();
-  const { data:{ subscription } }=supabase.auth.onAuthStateChange(async(_event,session)=>{await refreshSessionUi(session?.user||null);await restoreCachedReactions();});
+  if (wantsRecovery && !recoveryReady) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user && !session.user.is_anonymous) showRecovery();
+    else if (window.location.hash.includes('error=')) {
+      setRecoveryStatus('再設定リンクが無効か期限切れです。管理者画面から再設定メールを再送信してください。', true);
+    } else setRecoveryStatus('認証できませんでした。再設定メール内のリンクを開き直してください。', true);
+  }
   window.addEventListener('beforeunload',()=>{try{subscription.unsubscribe();if(realtimeChannel)supabase.removeChannel(realtimeChannel);}catch{}});
   await refreshSessionUi();await restoreCachedReactions();
   window.addEventListener('ofes-cloud-published',()=>{restoreCachedReactions();refreshRestorePointInfo();});

@@ -1,5 +1,10 @@
-## Ver.1.43 追加：公開済みプログラムを編集する
-管理画面「プログラム」で下書き／公開済みの件数を表示し、公開済みの演目をワンクリックで下書きに読み戻して編集できます。詳細は `OFES_VER143_EDIT_GUIDE.md` を参照。
+# OFES Ver.1.43 — 管理者パスワード再設定
+
+- 詳細：`OFES_VER143_PASSWORD_RECOVERY_GUIDE.md`
+- Supabase Redirect URLs登録が必要。Site URLは今回変更なし。
+- SQLは不要です。
+
+---
 
 # OFES Ver.1.41 — プログラムの選択削除／全削除・Excelセルコメント
 

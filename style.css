@@ -275,10 +275,38 @@
   flex:none;
 }
 
-/* Ver.1.43: 編集元データ（下書きと公開済み）の表示 */
-.program-draft-card{border:1px solid #bdd6cb;background:#f6faf8}
-.program-draft-warning{border:2px solid #d4a84c;background:#fffaf0}
-.program-draft-warning p{color:#614817}
-.program-edit-counts{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
-.program-edit-counts span{display:inline-block;background:#fff;border:1px solid #d5ded9;border-radius:8px;padding:9px 13px;color:#24463b}
-.program-edit-counts strong{font-size:1.12em;color:#175a40}
+
+/* Ver.1.43: administrator password recovery */
+.ofes-recovery-overlay[hidden],
+.ofes-recovery-card form[hidden] { display: none !important; }
+.ofes-recovery-overlay {
+  position: fixed;
+  z-index: 99999;
+  inset: 0;
+  background: rgba(12, 36, 30, 0.76);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
+}
+.ofes-recovery-card {
+  width: min(100%, 510px);
+  margin: auto;
+  background: #fff;
+  color: #193b30;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 18px 50px rgba(0,0,0,.25);
+}
+.ofes-recovery-card h1 { font-size: 1.35rem; margin: 0 0 12px; }
+.ofes-recovery-desc { line-height: 1.7; }
+.ofes-recovery-status { padding: 10px 12px; background: #edf7f1; border-radius: 8px; line-height: 1.7; }
+.ofes-recovery-status.error { background: #fff0ee; color: #b42b22; }
+.ofes-recovery-card form { display: grid; gap: 10px; padding: 10px 0 16px; }
+.ofes-recovery-card label { font-weight: 600; }
+.ofes-recovery-card input { width: 100%; min-height: 44px; border: 1px solid #a3b5ad; border-radius: 8px; padding: 10px; font-size: 16px; }
+.ofes-recovery-card form button { margin-top: 6px; }
+.ofes-reset-request { border: 1px solid #c7d8cf; background: #f7faf8; padding: 14px; border-radius: 10px; margin: 14px 0; }
+.ofes-reset-request strong { display: block; margin-bottom: 8px; }
+.ofes-reset-request .caption { margin: 6px 0 10px; line-height: 1.7; }
