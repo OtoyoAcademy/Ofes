@@ -310,3 +310,21 @@
 .ofes-reset-request { border: 1px solid #c7d8cf; background: #f7faf8; padding: 14px; border-radius: 10px; margin: 14px 0; }
 .ofes-reset-request strong { display: block; margin-bottom: 8px; }
 .ofes-reset-request .caption { margin: 6px 0 10px; line-height: 1.7; }
+
+/* Ver.1.45 — 各発表のリアクションは通常折りたたみ表示 */
+details.reactions-box {min-width:0;}
+details.reactions-box > summary.reactions-title {
+ display:inline-flex;align-items:center;gap:8px;list-style:none;
+ margin:0;border:1px solid #c6dac9;border-radius:999px;
+ background:#f2f8f3;color:#245b3c;padding:7px 12px;
+ font-size:12px;font-weight:800;min-height:34px;
+ cursor:pointer;user-select:none;
+}
+details.reactions-box > summary.reactions-title::-webkit-details-marker {display:none;}
+details.reactions-box > summary.reactions-title:focus-visible {outline:2px solid #267a50;outline-offset:3px;}
+details.reactions-box > summary.reactions-title:hover {background:#e6f3e9;}
+details.reactions-box .reaction-fold-chevron {font-size:17px;display:inline-block;line-height:1;transition:transform .16s ease;}
+details.reactions-box[open] .reaction-fold-chevron {transform:rotate(180deg);}
+details.reactions-box > .reaction-content {padding-top:10px;}
+details.reactions-box:not([open]) > .reaction-content {display:none;}
+.floor-detail details.reactions-box > summary.reactions-title {background:#f2f8f3;}

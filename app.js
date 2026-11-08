@@ -298,6 +298,15 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!byId('surveyImageM
 // 折りたたみの開閉状態は30秒ごとの自動更新でも維持する。
 // セッションと有志発表の両方で同じ仕組みを使用する。
 const programFoldStates=new Map();
+// Ver.1.45: 各演目のリアクションは初期状態で閉じ、利用者が開いた状態を維持する。
+// 同じ発表が別会場・別画面から表示されても、発表ごとの開閉操作を保持する。
+const reactionFoldStates=new Map();
+document.addEventListener('toggle',e=>{
+ const details=e.target;
+ if(details?.matches?.('details[data-reaction-fold]')){
+  reactionFoldStates.set(details.dataset.reactionFold,details.open);
+ }
+},true);
 function saveProgramFoldStates(){
  const list=byId('programList');
  if(!list)return;
@@ -680,9 +689,13 @@ function reactionsHtml(p){
  const info=reactionEligibility(p);
  const reactionId=p.reactionId||p.id;
  const selected=reactionSelection[reactionId]||[];
- return `<div class="reactions-box ${info.preview?'reaction-preview':''}" data-reaction-box="${esc(reactionId)}"><div class="reactions-title">この発表にリアクション</div>
-  <div class="reaction-choices">${REACTION_KINDS.map(([key,emoji,name])=>`<button type="button" title="${esc(name)}" aria-label="${esc(name)}" data-reaction-program="${esc(reactionId)}" data-reaction-kind="${key}" data-reaction-preview="${info.preview?'1':'0'}" class="reaction-choice ${selected.includes(key)?'is-selected':''}" aria-pressed="${selected.includes(key)}" ${info.active?'':'disabled'}><span aria-hidden="true">${emoji}</span></button>`).join('')}</div>
-  <p class="reaction-hint" data-reaction-message="${esc(reactionId)}" role="status" ${info.reason?'':'hidden'}>${info.reason}</p></div>`;
+ return `<details class="reactions-box ${info.preview?'reaction-preview':''}" data-reaction-box="${esc(reactionId)}" data-reaction-fold="${esc(p.id)}" ${reactionFoldStates.get(p.id)?'open':''}>
+  <summary class="reactions-title">リアクションを送る<span class="reaction-fold-chevron" aria-hidden="true">⌄</span></summary>
+  <div class="reaction-content">
+   <div class="reaction-choices">${REACTION_KINDS.map(([key,emoji,name])=>`<button type="button" title="${esc(name)}" aria-label="${esc(name)}" data-reaction-program="${esc(reactionId)}" data-reaction-kind="${key}" data-reaction-preview="${info.preview?'1':'0'}" class="reaction-choice ${selected.includes(key)?'is-selected':''}" aria-pressed="${selected.includes(key)}" ${info.active?'':'disabled'}><span aria-hidden="true">${emoji}</span></button>`).join('')}</div>
+   <p class="reaction-hint" data-reaction-message="${esc(reactionId)}" role="status" ${info.reason?'':'hidden'}>${info.reason}</p>
+  </div>
+ </details>`;
 }
 function refreshReactionButtons(programId){
  const selected=reactionSelection[programId]||[];
