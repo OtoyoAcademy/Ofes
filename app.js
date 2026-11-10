@@ -48,7 +48,7 @@ const DEFAULT_DATA = {
  internalPasscode:'', stampCompleteImage:'', stampHints:['','','','',''], surveys:[],
  test:{enabled:false,date:'2026-11-21',time:'09:25'},
  sessions:JSON.parse(JSON.stringify(DEFAULT_SESSIONS)),
- zones:[],safetyItems:[],nextSafetyId:1,nextIds:{campus:1,zenki1:1,zenki2:1,koki1:1,koki2:1,koki3:1},
+ zones:[],safetyItems:[],showSafetyInfo:false,nextSafetyId:1,nextIds:{campus:1,zenki1:1,zenki2:1,koki1:1,koki2:1,koki3:1},
  programs:[]
 };
 const clone = (v)=>JSON.parse(JSON.stringify(v));
@@ -107,6 +107,8 @@ function validData(v){
   if(migrateCampusV3&&z.mapId==='campus'){y=campusYV2toV3(y);h=campusHV2toV3(h);}
   return {id:z.id,mapId:z.mapId,name:String(z.name||'会場'),note:String(z.note||''),kind:String(z.kind||'classroom'),x:bound(z.x,0,100),y,w:bound(z.w,.1,100),h};
  });
+ // 旧版の公開データも安全情報の表示設定がなければ非表示とする。登録情報は保持する。
+ out.showSafetyInfo=v.showSafetyInfo===true;
  const rawSafety=Array.isArray(v.safetyItems)?v.safetyItems:[];
  out.safetyItems=rawSafety.filter(it=>it&&typeof it.id==='string'&&MAPS.some(m=>m.id===it.mapId)).map(it=>{
   if(it.kind==='route'){
@@ -174,7 +176,7 @@ function projectPublished(src){
  // テスト日時はブラウザ専用。公開データには送らず、全来場者で実時刻を使う。
  const publicPrograms=safe.programs.map(({presenters,...p})=>p);
  return {schemaVersion,campusCanvasVersion:safe.campusCanvasVersion,year:safe.year,eventDate:safe.eventDate,slogan:safe.slogan,sessions:clone(safe.sessions),
-   zones:clone(safe.zones),safetyItems:clone(safe.safetyItems),nextSafetyId:safe.nextSafetyId,nextIds:clone(safe.nextIds),programs:publicPrograms,reactionDeadline:safe.reactionDeadline,
+   zones:clone(safe.zones),safetyItems:clone(safe.safetyItems),showSafetyInfo:safe.showSafetyInfo,nextSafetyId:safe.nextSafetyId,nextIds:clone(safe.nextIds),programs:publicPrograms,reactionDeadline:safe.reactionDeadline,
    noticeTitle:safe.noticeTitle,noticeMessage:safe.noticeMessage,noticeIssuer:safe.noticeIssuer,stampCompleteImage:safe.stampCompleteImage,stampHints:clone(safe.stampHints),surveys:clone(safe.surveys.filter(x=>x.target==='public'||x.target==='both'))};
 }
 function projectInternal(src){
@@ -396,6 +398,7 @@ function bindReactionHelpToggle(buttonId,panelId){
 bindReactionHelpToggle('toggleReactionGuideProgram','reactionGuideProgram');
 bindReactionHelpToggle('toggleReactionGuideVenue','reactionGuideVenue');
 byId('toggleSafetyInfo')?.addEventListener('click',()=>{
+ if(state.showSafetyInfo!==true)return;
  safetyVisible=!safetyVisible;
  byId('toggleSafetyInfo').classList.toggle('active',safetyVisible);
  byId('toggleSafetyInfo').setAttribute('aria-pressed',String(safetyVisible));
@@ -417,7 +420,7 @@ function safetyPointHtml(it,admin=false){
  return `<button type="button" class="safety-marker safety-${esc(it.type)} ${selected?'selected':''}" style="left:${bound(it.x,0,100)}%;top:${bound(it.y,0,100)}%" data-safety="${esc(it.id)}" title="${esc(it.label||def.label)}" aria-label="${esc(it.label||def.label)}"><span>${esc(def.icon)}</span></button>`;
 }
 function safetyOverlayHtml(mapId,admin=false){
- if(!admin&&!safetyVisible)return '';
+ if(!admin&&(state.showSafetyInfo!==true||!safetyVisible))return ''; 
  const items=(state.safetyItems||[]).filter(it=>it.mapId===mapId);
  const routes=items.filter(it=>it.kind==='route');
  const points=items.filter(it=>it.kind!=='route');
@@ -510,8 +513,11 @@ function enableMapPinch(){
 }
 function renderVisitorMap(){
  renderBuildingTabs();renderSessionButtons();
- if(byId('toggleSafetyInfo')){byId('toggleSafetyInfo').classList.toggle('active',safetyVisible);byId('toggleSafetyInfo').setAttribute('aria-pressed',String(safetyVisible));byId('toggleSafetyInfo').textContent=safetyVisible?'安全情報を表示中':'安全情報を表示';}
- if(byId('safetyLegend'))byId('safetyLegend').hidden=!safetyVisible;
+ // 非公開中は前回の開閉状態を破棄し、表示ボタン・凡例・地図の安全情報を隠す。
+ const safetyPublished=state.showSafetyInfo===true;
+ if(!safetyPublished)safetyVisible=false;
+ if(byId('toggleSafetyInfo')){byId('toggleSafetyInfo').hidden=!safetyPublished; byId('toggleSafetyInfo').classList.toggle('active',safetyVisible);byId('toggleSafetyInfo').setAttribute('aria-pressed',String(safetyVisible));byId('toggleSafetyInfo').textContent=safetyVisible?'安全情報を表示中':'安全情報を表示';}
+ if(byId('safetyLegend'))byId('safetyLegend').hidden=!safetyPublished||!safetyVisible;
  const maps=visibleMaps();
  const programs=scheduledPrograms(),activeIds=new Set(programs.map(p=>p.zoneId).filter(Boolean));
  const count=state.zones.filter(z=>maps.some(m=>m.id===z.mapId)&&activeIds.has(z.id)).length;
@@ -829,7 +835,7 @@ function renderPreflight(){
  const deadlineMinute=deadline.startsWith(state.eventDate+'T')?timeNum(deadline.slice(11,16)):-1;
  const reactionOk=deadlineMinute>=lastEnd&&deadlineMinute>0;
  const stampOk=Boolean(state.stampCompleteImage);
- const safetyOk=(state.safetyItems||[]).length>0;
+ const safetyOk=state.showSafetyInfo!==true||(state.safetyItems||[]).length>0;
  const noticeOk=Boolean(String(state.noticeTitle||'').trim()&&String(state.noticeMessage||'').trim()&&String(state.noticeIssuer||'').trim());
  const cloudText=byId('firebasePublishSummary')?.textContent||'';
  const sdkText=byId('firebaseSdkStatus')?.textContent||'';
@@ -846,7 +852,7 @@ function renderPreflight(){
   {ok:passOk,title:'大豊学園 関係者パスコード',detail:passOk?'数字8〜24桁で設定済み':'数字8〜24桁で設定してください',tab:'basic'},
   {ok:reactionOk,title:'リアクション受付期限',detail:reactionOk?deadline.replace('T',' '):'最終プログラム後の日時を確認',tab:'basic'},
   {ok:stampOk,title:'スタンプラリー',detail:`${stampOk?'5個達成画像を設定済み':'5個達成画像が未設定'}／ヒント ${(state.stampHints||[]).filter(x=>String(x).trim()).length}/5`,tab:'stampqr'},
-  {ok:safetyOk,title:'安全情報',detail:safetyOk?`${state.safetyItems.length}件登録`:'消火器・避難経路等を確認',tab:'venues'},
+  {ok:safetyOk,title:'安全情報の公開',detail:state.showSafetyInfo===true?(safetyOk?`${state.safetyItems.length}件登録／来場者へ公開`:'公開ON：消火器・避難経路等を確認'):'公開OFF：来場者画面には表示しません（登録データは保持）',tab:'venues'},
   {ok:tvOk,title:'TV表示',detail:tvOk?'開催日・プログラムから自動表示':'開催日・プログラムを確認',tab:'basic'},
   {ok:backupOk,title:'最新バックアップ',detail:backupOk?'公開前の復元ポイントあり':'復元ポイントを確認してください',tab:'data'},
   {ok:noticeOk,title:'お知らせPDF',detail:noticeOk?'案内文を設定済み':'案内文・発行者を確認',tab:'notice'}
@@ -859,7 +865,15 @@ function renderPreflight(){
 byId('refreshPreflight')?.addEventListener('click',()=>renderPreflight());
 function renderAdmin(){byId('adminMapSelect').innerHTML=MAPS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');byId('adminMapSelect').value=adminMap;renderEditor();renderAdminPrograms();renderBasic();renderSurveyAdmin();renderNotice();renderStampQrAdmin();renderYearArchives();renderPreflight();setTimeout(renderPreflight,500);}
 byId('adminMapSelect').onchange=e=>{adminMap=e.target.value;editId='';editDraft=null;selectedSafetyId='';drawMode='';renderEditor()};
+byId('showSafetyInfoToVisitors')?.addEventListener('change',e=>{
+ state.showSafetyInfo=e.target.checked===true;
+ if(!state.showSafetyInfo)safetyVisible=false;
+ persist();renderPublic();renderPreflight();
+ toast(state.showSafetyInfo?'安全情報の公開をONにしました。来場者への反映は「データ保存」からSupabaseへ公開してください。':'安全情報の公開をOFFにしました。登録済みの安全情報は保持されます。来場者への反映は「データ保存」からSupabaseへ公開してください。');
+});
 function renderEditor(){
+ // 公開設定と登録済み安全設備は独立。管理者は非公開でも従来どおり編集できる。
+ if(byId('showSafetyInfoToVisitors'))byId('showSafetyInfoToVisitors').checked=state.showSafetyInfo===true;
  const m=getMap(adminMap);byId('adminMapSelect').value=adminMap;byId('adminMapImage').src=m.src;byId('adminMapImage').alt=m.name;
  const stage=byId('adminStage');stage.classList.toggle('drawing',Boolean(drawMode));stage.classList.toggle('campus-canvas',adminMap==='campus');
  byId('drawGuide').textContent=drawMode?(drawMode.includes('safety-point')?'安全設備：図面上の位置を1回タップしてください。':drawMode.includes('safety-route')?'避難経路：開始地点から終了地点までドラッグしてください。':`${drawMode==='new'?'新しい会場':'位置の再指定'}：図面上で教室の枠をドラッグして囲んでください。`):'登録済みの会場または安全情報をタップすると編集できます。';

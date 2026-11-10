@@ -328,3 +328,10 @@ details.reactions-box[open] .reaction-fold-chevron {transform:rotate(180deg);}
 details.reactions-box > .reaction-content {padding-top:10px;}
 details.reactions-box:not([open]) > .reaction-content {display:none;}
 .floor-detail details.reactions-box > summary.reactions-title {background:#f2f8f3;}
+
+/* Ver.1.46：安全情報の公開・非公開を管理者が選択 */
+.safety-publication-setting{border:1px solid #bfd4c5;border-radius:12px;background:#f3faf5;padding:13px 14px;margin:10px 0 15px}
+.safety-publication-label{display:flex;gap:10px;align-items:center;cursor:pointer;color:#194c32;font-size:15px;line-height:1.5}
+.safety-publication-label input{width:19px;height:19px;flex:0 0 19px;accent-color:#196a43;cursor:pointer}
+.safety-publication-setting .caption{margin:8px 0 0;line-height:1.7}
+.safety-toggle[hidden],.safety-legend[hidden]{display:none!important}
