@@ -1486,12 +1486,37 @@ function renderSurveyAdmin(){
 }
 byId('addSurvey')?.addEventListener('click',()=>{const n=(state.surveys||[]).length+1;state.surveys.push({id:`survey-${Date.now()}`,title:`アンケート${n}`,message:'アンケートへのご協力をお願いします。',url:'',image:'',buttonLabel:'回答する',enabled:true,target:'both',startAt:'',endAt:'',order:n});persist();renderSurveyAdmin();toast('アンケートを追加しました');});
 
+// Ver.1.48: お知らせPDFにのみ使うパスコードは専用の入力欄で確認する。
+// Supabaseの公開データには平文パスコードがないため、別端末では手入力が必要。
+// この入力欄は追加の保存先（localStorage / Supabase）を持たせない。
+let noticePasscodeManuallyEdited=false;
+let noticePasscodeYear=null;
 function renderNotice(){
  byId('noticeTitle').value=state.noticeTitle||DEFAULT_DATA.noticeTitle;
  byId('noticeMessage').value=state.noticeMessage||DEFAULT_DATA.noticeMessage;
  byId('noticeIssuer').value=state.noticeIssuer||DEFAULT_DATA.noticeIssuer;
  byId('noticeAppUrl').textContent=appPublicUrl();
+ const field=byId('noticeInternalPasscode');
+ if(noticePasscodeYear!==state.year){
+  noticePasscodeYear=state.year;
+  noticePasscodeManuallyEdited=false;
+  field.value='';
+ }
+ if(!noticePasscodeManuallyEdited)field.value=state.internalPasscode||'';
+ const hint=byId('noticePasscodeHint');
+ if(hint)hint.textContent=state.internalPasscode
+  ? '年度設定に入力されている値を表示しています。配布前に、現在有効な関係者用パスコードと一致することを確認してください。この欄の変更内容は保存されません。'
+  : 'この端末には関係者用パスコードが保存されていません。現在有効な数字8〜24桁を入力してください。この欄の変更内容は保存されません。';
 }
+byId('noticeInternalPasscode')?.addEventListener('input',e=>{
+ noticePasscodeManuallyEdited=true;
+ // 数字キーボードを使用できる端末以外でも英字は受け付けない。
+ const cleaned=e.target.value.replace(/[^0-9]/g,'').slice(0,24);
+ if(e.target.value!==cleaned)e.target.value=cleaned;
+});
+byId('noticePasscodeVisible')?.addEventListener('change',e=>{
+ byId('noticeInternalPasscode').type=e.target.checked?'text':'password';
+});
 byId('saveNotice').onclick=()=>{
  state.noticeTitle=byId('noticeTitle').value.trim()||DEFAULT_DATA.noticeTitle;
  state.noticeMessage=byId('noticeMessage').value.trim()||DEFAULT_DATA.noticeMessage;
@@ -1524,6 +1549,15 @@ byId('printStampSheet').onclick=()=>openStampQrPrint('sheet');
 function jpEventDate(iso){try{const d=new Date(iso+'T00:00:00');return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${'日月火水木金土'[d.getDay()]}）`;}catch(e){return iso}}
 function nl2brText(v){return esc(v).replace(/\n/g,'<br>')}
 byId('printNotice').onclick=()=>{
+ const noticePasscode=byId('noticeInternalPasscode').value.trim();
+ if(!/^[0-9]{8,24}$/.test(noticePasscode)){
+  alert('お知らせPDFに記載する「大豊学園関係者用パスコード」を数字8〜24桁で入力してください。');
+  byId('noticeInternalPasscode').focus();
+  return;
+ }
+ if(state.internalPasscode && noticePasscode!==state.internalPasscode){
+  if(!confirm('このPDFに記載するパスコードは、この端末の年度設定に保存された値と異なります。実際に関係者入口で有効か確認しましたか？\n\n確認済みの場合のみ「OK」を押してください。'))return;
+ }
  byId('saveNotice').click();
  const url=appPublicUrl();
  const qr=new URL('assets/app-qr.png',location.href).href;
@@ -1531,13 +1565,14 @@ byId('printNotice').onclick=()=>{
  const w=window.open('','OFES_NOTICE_PDF','width=900,height=1000');
  if(!w){alert('印刷画面を開けませんでした。ポップアップを許可してください。');return;}
  const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${esc(state.noticeTitle)}</title><style>
- @page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP","Yu Gothic",Meiryo,sans-serif;color:#172019;margin:0;font-size:11.2pt;line-height:1.55}h1{font-size:20pt;margin:0 0 5mm;text-align:center}h2{font-size:13.5pt;margin:4mm 0 2mm;border-left:5px solid #197a4b;padding-left:8px}.top{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #197a4b;padding-bottom:4mm;margin-bottom:4mm}.brand{display:flex;align-items:center;gap:10px}.brand img{width:18mm;height:18mm;object-fit:contain}.meta{text-align:right;font-size:9.5pt}.message{background:#f5f8f4;border:1px solid #cfd9d0;border-radius:8px;padding:4mm;margin:3mm 0}.main-grid{display:grid;grid-template-columns:1.6fr .8fr;gap:5mm;align-items:start}.qrbox{text-align:center;border:1px solid #cfd9d0;border-radius:10px;padding:4mm}.qrbox img{width:36mm;height:36mm}.url{font-size:7.5pt;word-break:break-all}.features{margin:1mm 0 0;padding-left:5mm}.features li{margin:1.2mm 0}.install{display:grid;grid-template-columns:1fr 1fr;gap:4mm}.install>div{border:1px solid #cfd9d0;border-radius:8px;padding:3mm}.install ol{margin:1mm 0 0;padding-left:6mm}.note{font-size:8.6pt;color:#526058;margin-top:4mm;border-top:1px solid #d8ddd8;padding-top:3mm}.issuer{text-align:right;margin-top:3mm;font-weight:700}@media print{.printbar{display:none}}.printbar{position:fixed;right:12px;top:12px}.printbar button{font-size:16px;padding:10px 18px}
+ @page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP","Yu Gothic",Meiryo,sans-serif;color:#172019;margin:0;font-size:11.2pt;line-height:1.55}h1{font-size:20pt;margin:0 0 5mm;text-align:center}h2{font-size:13.5pt;margin:4mm 0 2mm;border-left:5px solid #197a4b;padding-left:8px}.top{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #197a4b;padding-bottom:4mm;margin-bottom:4mm}.brand{display:flex;align-items:center;gap:10px}.brand img{width:18mm;height:18mm;object-fit:contain}.meta{text-align:right;font-size:9.5pt}.message{background:#f5f8f4;border:1px solid #cfd9d0;border-radius:8px;padding:4mm;margin:3mm 0}.main-grid{display:grid;grid-template-columns:1.6fr .8fr;gap:5mm;align-items:start}.qrbox{text-align:center;border:1px solid #cfd9d0;border-radius:10px;padding:4mm}.qrbox img{width:36mm;height:36mm}.url{font-size:7.5pt;word-break:break-all}.features{margin:1mm 0 0;padding-left:5mm}.features li{margin:1.2mm 0}.install{display:grid;grid-template-columns:1fr 1fr;gap:4mm}.install>div{border:1px solid #cfd9d0;border-radius:8px;padding:3mm}.install ol{margin:1mm 0 0;padding-left:6mm}.note{font-size:8.6pt;color:#526058;margin-top:4mm;border-top:1px solid #d8ddd8;padding-top:3mm}.issuer{text-align:right;margin-top:3mm;font-weight:700}.internal-access-box{border:2px solid #197a4b;border-radius:9px;padding:3mm 4mm;margin:4mm 0;background:#f0f7f1;break-inside:avoid}.internal-access-box strong{display:block;font-size:11pt;color:#164f36}.internal-access-code{font-size:21pt;font-weight:900;letter-spacing:.14em;line-height:1.4;text-align:center;margin:1mm 0;color:#143e2d}.internal-access-box p{margin:1mm 0 0;font-size:9.2pt}@media print{.printbar{display:none}}.printbar{position:fixed;right:12px;top:12px}.printbar button{font-size:16px;padding:10px 18px}
  </style></head><body><div class="printbar"><button onclick="window.print()">印刷／PDFとして保存</button></div>
  <div class="top"><div class="brand"><img src="${logo}"><div><strong>OFES - おおフェス</strong><div>保護者の皆様へ</div></div></div><div class="meta">開催日：${jpEventDate(state.eventDate)}<br>${esc(state.noticeIssuer)}</div></div>
  <h1>${esc(state.noticeTitle)}</h1><div class="message">${nl2brText(state.noticeMessage)}</div>
  <div class="main-grid"><div><h2>OFESアプリでできること</h2><ul class="features"><li><strong>プログラム：</strong>発表時間・発表内容・会場を確認できます。</li><li><strong>会場案内：</strong>学校全体図、前期棟、後期棟から会場を確認できます。</li><li><strong>スタンプラリー：</strong>校内5か所のQRコードを読み取って楽しめます。</li><li><strong>リアクション：</strong>発表への感想を5種類のボタンで届けられます。</li></ul><p><strong>今年度のスローガン：</strong>${esc(state.slogan)}</p></div><div class="qrbox"><strong>OFESはこちら</strong><br><img src="${qr}" alt="OFES QRコード"><div class="url">${esc(url)}</div><small>カメラでQRコードを読み取ってください。</small></div></div>
+ <div class="internal-access-box"><strong>大豊学園関係者用パスコード</strong><div class="internal-access-code">${esc(noticePasscode)}</div><p>児童生徒・保護者・学校関係者の方は、最初の画面で<strong style="display:inline">「大豊学園関係者」</strong>を選び、この番号を入力してください。</p></div>
  <h2>スマートフォンのホーム画面に追加する方法</h2><div class="install"><div><strong>iPhone（Safari）</strong><ol><li>QRコードからOFESをSafariで開く</li><li>画面下の「共有」ボタン（□に↑）をタップ</li><li>「ホーム画面に追加」を選ぶ</li><li>「追加」をタップ</li></ol></div><div><strong>Android（Chrome）</strong><ol><li>QRコードからOFESをChromeで開く</li><li>右上の「︙」メニューをタップ</li><li>「ホーム画面に追加」または「アプリをインストール」を選ぶ</li><li>画面の案内に従って追加する</li></ol></div></div>
- ${state.internalPasscode?`<div class="message"><strong>大豊学園関係者用パスコード：</strong> <span style="font-size:16pt;font-weight:800;letter-spacing:.08em">${esc(state.internalPasscode)}</span><br><small>児童生徒・保護者・学校関係者は、最初の画面で「大豊学園関係者」を選び、このパスコードを入力してください。</small></div>`:''}<div class="note">※ OFESはWebアプリです。一般来場者は「一般来場者」から利用できます。児童生徒名は一般来場者には表示されません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div><div class="issuer">${esc(state.noticeIssuer)}</div>
+ <div class="note">※ OFESはWebアプリです。一般来場者は「一般来場者」から利用できます。児童生徒名は一般来場者には表示されません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div><div class="issuer">${esc(state.noticeIssuer)}</div>
  </body></html>`;
  w.document.open();w.document.write(html);w.document.close();
 };
