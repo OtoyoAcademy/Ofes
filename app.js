@@ -278,8 +278,19 @@ function programStatus(p){
  return {key:'ended',label:'終了しました'};
 }
 function dateISO(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${dd}`}
-function viewTime(){if(state.test.enabled){return {date:state.test.date,time:state.test.time,minute:timeNum(state.test.time),demo:true}}
- const d=new Date();return{date:dateISO(d),time:`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,minute:d.getHours()*60+d.getMinutes(),demo:false};}
+// テスト日時はブラウザ内の下書きに属し、Supabaseには公開しない。
+// 管理画面を閉じると表示データ(state)は公開データに戻るが、
+// 同じ端末のTV表示では下書きのテスト日時を引き続き参照する。
+function localTestSettings(){
+ return (editorActive?state.test:draftState.test)||DEFAULT_DATA.test;
+}
+function viewTime(){
+ const preview=localTestSettings();
+ if(preview.enabled && /^\d{4}-\d{2}-\d{2}$/.test(String(preview.date||'')) && /^\d{2}:\d{2}$/.test(String(preview.time||''))){
+  return {date:preview.date,time:preview.time,minute:timeNum(preview.time),demo:true};
+ }
+ const d=new Date();return{date:dateISO(d),time:`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,minute:d.getHours()*60+d.getMinutes(),demo:false};
+}
 function activePrograms(){const t=viewTime();return state.programs.filter(p=>{const pt=programTimes(p);return t.date===state.eventDate && timeNum(pt.start)<=t.minute && t.minute<timeNum(pt.end)})}
 function scheduledPrograms(){if(session==='current')return activePrograms();return state.programs.filter(p=>p.session===session)}
 function orderedPrograms(){return [...state.programs].sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||String(a.zoneId).localeCompare(String(b.zoneId))||String(a.id).localeCompare(String(b.id)))}
@@ -287,10 +298,11 @@ function roomLabel(p){return getZone(p.zoneId)?.name||(venueNotRequired(p)?'会�
 function renderHeader(){
  byId('heroYear').textContent=state.year;
  byId('heroSlogan').textContent=state.slogan;
- const today=new Date(),end=new Date(state.eventDate+'T00:00:00'), start=new Date(dateISO(today)+'T00:00:00');
+ const v=viewTime();
+ const end=new Date(state.eventDate+'T00:00:00'), start=new Date(v.date+'T00:00:00');
  const dif=Math.round((end.getTime()-start.getTime())/86400000);
  byId('countdown').textContent=dif>0?`開催まであと ${dif} 日`:dif===0?'いよいよ本日！':'今年のおおフェスは終了しました';
- const v=viewTime();byId('previewTag').hidden=!v.demo;byId('previewTag').textContent=`TEST ${v.date} ${v.time}`;
+ byId('previewTag').hidden=!v.demo;byId('previewTag').textContent=`TEST ${v.date} ${v.time}`;
 }
 function setTab(tab,opts={}){if(tab!=='stamp'&&stampScannerActive)closeStampScanner();$$('.nav[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$$('.tab-view').forEach(v=>v.classList.toggle('active',v.id===`tab-${tab}`));if(tab==='venues')renderVisitorMap();if(opts.scrollTop!==false)window.scrollTo({top:0,behavior:'smooth'});}
 $$('.nav[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
@@ -780,6 +792,7 @@ function renderTv(){
  const panel=byId('tvPanel');if(!panel||panel.hidden)return;
  byId('tvYear').textContent=state.year;byId('tvSlogan').textContent=state.slogan;
  const v=viewTime();byId('tvClock').textContent=`${v.date.replaceAll('-','/')} ${v.time}`;
+ const tvTestBadge=byId('tvTestBadge');if(tvTestBadge)tvTestBadge.hidden=!v.demo;
  const content=byId('tvContent');const all=orderedPrograms();
  if(v.date<state.eventDate){const now=new Date(v.date+'T00:00:00'),event=new Date(state.eventDate+'T00:00:00'),days=Math.max(0,Math.round((event-now)/86400000));content.innerHTML=`<div class="tv-message countdown"><span>おおフェスまで</span><strong>あと ${days} 日</strong><p>${esc(jpEventDate(state.eventDate))}</p></div>`;return;}
  if(v.date>state.eventDate){content.innerHTML='<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>';return;}
@@ -1665,4 +1678,4 @@ setTimeout(()=>{
  }
 },16000);
 window.addEventListener('resize',()=>{if($('#tab-venues').classList.contains('active'))sizeVisibleFloorMaps();});
-setInterval(()=>{if(!state.test.enabled){renderHeader();renderProgram();renderSurveys();if($('#tab-venues').classList.contains('active'))renderVisitorMap();renderTv();}},30000);
+setInterval(()=>{if(!viewTime().demo){renderHeader();renderProgram();renderSurveys();if($('#tab-venues').classList.contains('active'))renderVisitorMap();renderTv();}},30000);

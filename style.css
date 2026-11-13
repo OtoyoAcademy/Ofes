@@ -359,3 +359,6 @@ details.reactions-box:not([open]) > .reaction-content {display:none;}
 #loadPublishedNoticeStatus{min-height:1.5em}
 #loadPublishedNoticeStatus.notice-sync-error{color:#a12f25;font-weight:700}
 #loadPublishedNoticeStatus.notice-sync-ok{color:#176b44;font-weight:700}
+
+/* Ver.1.50: TV画面のローカル日時テストを分かりやすく表示する */
+.tv-test-badge{display:inline-flex;align-items:center;border-radius:999px;background:#fff3d8;color:#704009;font-weight:800;font-size:13px;padding:4px 10px;letter-spacing:.02em}.tv-test-badge[hidden]{display:none}
