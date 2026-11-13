@@ -291,6 +291,21 @@ function viewTime(){
  }
  const d=new Date();return{date:dateISO(d),time:`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,minute:d.getHours()*60+d.getMinutes(),demo:false};
 }
+// Ver.1.51: すでに開いている別タブのTV表示へもテスト日時の変更を反映する。
+// 同一オリジンの別タブで下書きが更新されるとstorageイベントが発生する。
+// テスト日時のみ同期し、来場者表示用の公開データや他の下書き項目は書き換えない。
+window.addEventListener('storage',(event)=>{
+ if(event.key!==STORAGE_KEY || !event.newValue)return;
+ try{
+  const incoming=JSON.parse(event.newValue);
+  const next=incoming?.test;
+  if(!next || typeof next!=='object')return;
+  if(editorActive)return; // 編集中のタブの設定は、このタブの操作を優先する。
+  if(next.enabled===draftState.test?.enabled && next.date===draftState.test?.date && next.time===draftState.test?.time)return;
+  draftState.test={...clone(DEFAULT_DATA.test),enabled:next.enabled===true,date:String(next.date||''),time:String(next.time||'')};
+  renderPublic();
+ }catch(error){console.warn('別タブのテスト日時を反映できませんでした',error);}
+});
 function activePrograms(){const t=viewTime();return state.programs.filter(p=>{const pt=programTimes(p);return t.date===state.eventDate && timeNum(pt.start)<=t.minute && t.minute<timeNum(pt.end)})}
 function scheduledPrograms(){if(session==='current')return activePrograms();return state.programs.filter(p=>p.session===session)}
 function orderedPrograms(){return [...state.programs].sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||String(a.zoneId).localeCompare(String(b.zoneId))||String(a.id).localeCompare(String(b.id)))}
@@ -455,12 +470,15 @@ function floorLabel(m){return m.floor?`${m.floor}階`:'学校全体図'}
 function floorDetailHtml(m){
  const z=getZone(visitorSelected);
  if(!z||z.mapId!==m.id)return '';
- let ps=state.programs.filter(p=>p.zoneId===z.id).slice();
+ // Only show details of venues with an actual scheduled program in the selected time slot.
+ const scheduledIds=new Set(scheduledPrograms().map(p=>p.id));
+ let ps=state.programs.filter(p=>p.zoneId===z.id&&scheduledIds.has(p.id)).slice();
  if(reactionPreviewMode&&reactionPreviewProgram?.zoneId===z.id&&!ps.some(p=>p.id===reactionPreviewProgram.id))ps.push(reactionPreviewProgram);
+ if(!ps.length)return '';
  ps.sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||timeNum(programTimes(a).end)-timeNum(programTimes(b).end)||String(a.id).localeCompare(String(b.id)));
  return `<h4>${esc(z.name)} <span class="pill">${esc(z.id)}</span></h4>${z.note?`<p>${esc(z.note)}</p>`:''}
  <p class="muted">${esc(m.name)}　登録されている発表：${ps.length}件</p>
- ${ps.length?`<div class="venue-program-list">${ps.map(p=>{const pt=programTimes(p),st=programStatus(p);return `<article class="venue-program-item status-border-${st.key}"><div class="venue-program-meta"><span class="program-status status-${st.key}">${st.label}</span><strong>${esc(sessionLabel(p.session))}</strong><span>${esc(pt.start)}〜${esc(pt.end)}</span></div><div class="venue-program-title">${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</div>${presentersHtml(p)}${reactionsHtml(p)}</article>`}).join('')}</div>`:'<p>この会場のプログラムはまだ登録されていません。</p>'}`;
+ <div class="venue-program-list">${ps.map(p=>{const pt=programTimes(p),st=programStatus(p);return `<article class="venue-program-item status-border-${st.key}"><div class="venue-program-meta"><span class="program-status status-${st.key}">${st.label}</span><strong>${esc(sessionLabel(p.session))}</strong><span>${esc(pt.start)}〜${esc(pt.end)}</span></div><div class="venue-program-title">${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</div>${presentersHtml(p)}${reactionsHtml(p)}</article>`}).join('')}</div>`;
 }
 function updateSelectedFloorDetails(){
  $$('#visitorMaps [data-zone]').forEach(b=>{
@@ -542,10 +560,16 @@ function renderVisitorMap(){
  const maps=visibleMaps();
  const programs=scheduledPrograms(),activeIds=new Set(programs.map(p=>p.zoneId).filter(Boolean));
  const count=state.zones.filter(z=>maps.some(m=>m.id===z.mapId)&&activeIds.has(z.id)).length;
+ // Public venue guide shows only rooms scheduled for the chosen slot.
+ // The administrator's map continues to show all saved venue registrations.
+ if(visitorSelected&&!activeIds.has(visitorSelected))visitorSelected='';
+ const mapVisible=maps.filter(m=>state.zones.some(z=>z.mapId===m.id&&activeIds.has(z.id)));
  const buildingName={campus:'学校全体',zenki:'前期棟',koki:'後期棟'}[visitorBuilding];
  byId('mapSummary').textContent=session==='current'?`現在：${viewTime().time}　${buildingName}で使用中の会場：${count}か所`:`${sessionLabel(session)}（${sessionDef(session).start}〜${sessionDef(session).end}）　${buildingName}で使用する会場：${count}か所`;
- byId('visitorMaps').innerHTML=maps.map(m=>{
-  const zones=state.zones.filter(z=>z.mapId===m.id),floorCount=zones.filter(z=>activeIds.has(z.id)).length;
+ const legend=byId('visitorMapLegend');if(legend)legend.hidden=count===0;
+ const usage=byId('visitorMapUsage');if(usage)usage.hidden=count===0;
+ byId('visitorMaps').innerHTML=mapVisible.map(m=>{
+  const zones=state.zones.filter(z=>z.mapId===m.id&&activeIds.has(z.id)),floorCount=zones.length;
   return `<article class="floor-card" id="floor-${esc(m.id)}">
    <div class="floor-card-header"><div><h3>${esc(floorLabel(m))}</h3><span class="floor-subtitle">${esc(m.name)}</span></div><span class="floor-count">${floorCount}か所 使用</span></div>
    <div class="floor-tools"><span>図を拡大して会場をタップ</span><div class="floor-zoom"><button type="button" data-zoom-map="${m.id}" data-zoom-action="out" aria-label="${esc(m.name)}を縮小">−</button><span id="zoom-${m.id}">${visitorZoom[m.id]}%</span><button type="button" data-zoom-map="${m.id}" data-zoom-action="in" aria-label="${esc(m.name)}を拡大">＋</button><button type="button" class="zoom-reset" data-zoom-map="${m.id}" data-zoom-action="reset">戻す</button></div></div>
@@ -786,27 +810,55 @@ byId('internalLoginForm')?.addEventListener('submit',async e=>{e.preventDefault(
 byId('backToEntry')?.addEventListener('click',()=>{audienceMode='';internalPresenterMap={};internalSurveyList=[];sessionStorage.removeItem(ACCESS_MODE_KEY);showEntryGate();renderAudienceMode();renderSurveys();});
 byId('entryAdmin')?.addEventListener('click',()=>{hideEntryGate();byId('openAdmin').click();});
 
+// Ver.1.52: Display concurrent TV programs in readable pages rather than overflowing.
+const TV_PAGE_DURATION=8000;
+let tvSlideIndex=0,tvSlideCount=1,tvSlideKey='',tvSlideLastChange=Date.now(),tvSlidePaused=false;
 function tvPeople(p){const names=currentPresenterNames(p);const publicPeople=[p.grade,p.group].filter(Boolean).join(' ');return names?`${publicPeople}${publicPeople?' / ':''}${names}`:(publicPeople||'発表者');}
-function tvProgramCard(p){const pt=programTimes(p);return `<article class="tv-program-card"><div class="tv-time">${esc(pt.start)}〜${esc(pt.end)}</div><h2>${esc(p.title)}</h2><div class="tv-meta"><span>📍 ${esc(roomLabel(p))}</span><span>👥 ${esc(tvPeople(p))}</span></div></article>`;}
+function tvProgramCard(p){const pt=programTimes(p);const place=getZone(p.zoneId);return `<article class="tv-program-card"><div class="tv-time">${esc(pt.start)}〜${esc(pt.end)}</div><h2>${esc(p.title)}</h2><div class="tv-meta">${place?`<span>📍 ${esc(place.name)}</span>`:''}<span>👥 ${esc(tvPeople(p))}</span></div></article>`;}
+function tvSlidesFor(label,items){
+ const panel=byId('tvPanel'),content=byId('tvContent');
+ // A laptop/portrait display gets one large card; a full-size landscape TV gets two.
+ const perPage=panel.classList.contains('tv-portrait')||window.innerWidth<1100||window.innerHeight<820?1:2;
+ const nextKey=[label,perPage,...items.map(p=>`${p.id}:${programTimes(p).start}:${programTimes(p).end}:${p.title}`)].join('|');
+ if(nextKey!==tvSlideKey){tvSlideKey=nextKey;tvSlideIndex=0;tvSlideLastChange=Date.now();}
+ tvSlideCount=Math.max(1,Math.ceil(items.length/perPage));
+ tvSlideIndex=Math.min(tvSlideIndex,tvSlideCount-1);
+ const visible=items.slice(tvSlideIndex*perPage,(tvSlideIndex+1)*perPage);
+ content.innerHTML=`<div class="tv-kicker">${label}</div><div class="tv-program-grid">${visible.map(tvProgramCard).join('')}</div>${tvSlideCount>1?`<div class="tv-slides-control" aria-label="TVのページ切り替え"><button type="button" data-tv-slide="prev" aria-label="前のページ">‹ 前へ</button><span class="tv-slide-count">${tvSlideIndex+1} / ${tvSlideCount}ページ</span><button type="button" data-tv-slide="pause" aria-label="自動切り替えを${tvSlidePaused?'再開':'停止'}する">${tvSlidePaused?'▶ 再開':'Ⅱ 一時停止'}</button><button type="button" data-tv-slide="next" aria-label="次のページ">次へ ›</button><span class="tv-slide-hint">${tvSlidePaused?'一時停止中':'8秒ごとに自動切り替え'}</span></div>`:''}`;
+}
 function renderTv(){
  const panel=byId('tvPanel');if(!panel||panel.hidden)return;
  byId('tvYear').textContent=state.year;byId('tvSlogan').textContent=state.slogan;
  const v=viewTime();byId('tvClock').textContent=`${v.date.replaceAll('-','/')} ${v.time}`;
  const tvTestBadge=byId('tvTestBadge');if(tvTestBadge)tvTestBadge.hidden=!v.demo;
  const content=byId('tvContent');const all=orderedPrograms();
- if(v.date<state.eventDate){const now=new Date(v.date+'T00:00:00'),event=new Date(state.eventDate+'T00:00:00'),days=Math.max(0,Math.round((event-now)/86400000));content.innerHTML=`<div class="tv-message countdown"><span>おおフェスまで</span><strong>あと ${days} 日</strong><p>${esc(jpEventDate(state.eventDate))}</p></div>`;return;}
- if(v.date>state.eventDate){content.innerHTML='<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>';return;}
- const active=activePrograms();if(active.length){content.innerHTML=`<div class="tv-kicker">ただいま開催中</div><div class="tv-program-grid">${active.map(tvProgramCard).join('')}</div>`;return;}
+ // Non-program states are single screens. Clear the page key so a subsequent program restarts at page one.
+ const singleScreen=html=>{tvSlideKey='';tvSlideCount=1;tvSlideIndex=0;content.innerHTML=html;};
+ if(v.date<state.eventDate){const now=new Date(v.date+'T00:00:00'),event=new Date(state.eventDate+'T00:00:00'),days=Math.max(0,Math.round((event-now)/86400000));singleScreen(`<div class="tv-message countdown"><span>おおフェスまで</span><strong>あと ${days} 日</strong><p>${esc(jpEventDate(state.eventDate))}</p></div>`);return;}
+ if(v.date>state.eventDate){singleScreen('<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>');return;}
+ const active=activePrograms();if(active.length){tvSlidesFor('ただいま開催中',active);return;}
  const starts=all.map(p=>timeNum(programTimes(p).start));const ends=all.map(p=>timeNum(programTimes(p).end));const first=starts.length?Math.min(...starts):9999,last=ends.length?Math.max(...ends):-1;
  const deadlineTime=state.reactionDeadline?.startsWith(state.eventDate)?timeNum(state.reactionDeadline.slice(11,16)):17*60;
- if(v.minute<first){content.innerHTML='<div class="tv-message"><strong>本日、おおフェス開催！</strong><p>まもなくプログラムが始まります。</p></div>';return;}
- if(v.minute>=last){if(v.minute<deadlineTime){content.innerHTML=`<div class="tv-message reaction"><strong>本日のプログラムは終了しました。</strong><p>リアクションは <b>${esc(state.reactionDeadline.slice(11,16))}</b> まで受付中です。<br>ぜひ発表への感想を届けてください。</p></div>`;}else{content.innerHTML='<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>';}return;}
- const next=all.filter(p=>timeNum(programTimes(p).start)>v.minute);const nextStart=next.length?Math.min(...next.map(p=>timeNum(programTimes(p).start))):null;const group=nextStart===null?[]:next.filter(p=>timeNum(programTimes(p).start)===nextStart);content.innerHTML=`<div class="tv-kicker">次のプログラム</div><div class="tv-program-grid">${group.map(tvProgramCard).join('')}</div>`;
+ if(v.minute<first){singleScreen('<div class="tv-message"><strong>本日、おおフェス開催！</strong><p>まもなくプログラムが始まります。</p></div>');return;}
+ if(v.minute>=last){if(v.minute<deadlineTime){singleScreen(`<div class="tv-message reaction"><strong>本日のプログラムは終了しました。</strong><p>リアクションは <b>${esc(state.reactionDeadline.slice(11,16))}</b> まで受付中です。<br>ぜひ発表への感想を届けてください。</p></div>`);}else{singleScreen('<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>');}return;}
+ const next=all.filter(p=>timeNum(programTimes(p).start)>v.minute);const nextStart=next.length?Math.min(...next.map(p=>timeNum(programTimes(p).start))):null;const group=nextStart===null?[]:next.filter(p=>timeNum(programTimes(p).start)===nextStart);
+ if(group.length)tvSlidesFor('次のプログラム',group);else singleScreen('<div class="tv-message"><strong>次のプログラムを準備中です。</strong></div>');
 }
+byId('tvContent')?.addEventListener('click',e=>{
+ const btn=e.target.closest?.('[data-tv-slide]');if(!btn)return;
+ const action=btn.dataset.tvSlide;
+ if(action==='pause'){tvSlidePaused=!tvSlidePaused;}
+ else if(tvSlideCount>1){tvSlideIndex=(tvSlideIndex+(action==='prev'?-1:1)+tvSlideCount)%tvSlideCount;}
+ tvSlideLastChange=Date.now();renderTv();
+});
+setInterval(()=>{
+ if(byId('tvPanel')?.hidden||tvSlideCount<=1||tvSlidePaused)return;
+ if(Date.now()-tvSlideLastChange>=TV_PAGE_DURATION){tvSlideIndex=(tvSlideIndex+1)%tvSlideCount;tvSlideLastChange=Date.now();renderTv();}
+},1000);
 byId('openTv')?.addEventListener('click',()=>{byId('tvPanel').hidden=false;renderTv();});
 byId('closeTv')?.addEventListener('click',()=>{byId('tvPanel').hidden=true;if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
-byId('tvLandscape')?.addEventListener('click',()=>{byId('tvPanel').classList.add('tv-landscape');byId('tvPanel').classList.remove('tv-portrait');byId('tvLandscape').classList.add('active');byId('tvPortrait').classList.remove('active');});
-byId('tvPortrait')?.addEventListener('click',()=>{byId('tvPanel').classList.add('tv-portrait');byId('tvPanel').classList.remove('tv-landscape');byId('tvPortrait').classList.add('active');byId('tvLandscape').classList.remove('active');});
+byId('tvLandscape')?.addEventListener('click',()=>{byId('tvPanel').classList.add('tv-landscape');byId('tvPanel').classList.remove('tv-portrait');byId('tvLandscape').classList.add('active');byId('tvPortrait').classList.remove('active');renderTv();});
+byId('tvPortrait')?.addEventListener('click',()=>{byId('tvPanel').classList.add('tv-portrait');byId('tvPanel').classList.remove('tv-landscape');byId('tvPortrait').classList.add('active');byId('tvLandscape').classList.remove('active');renderTv();});
 byId('tvFullscreen')?.addEventListener('click',async()=>{try{if(!document.fullscreenElement)await byId('tvPanel').requestFullscreen();else await document.exitFullscreen();}catch{}});
 
 async function compressStampImage(file){
@@ -1677,5 +1729,5 @@ setTimeout(()=>{
    byId('firebaseAuthMessage').textContent='通信環境を確認し、GitHub Pages（https://）で開いてください。ローカルファイルからは認証できません。';
  }
 },16000);
-window.addEventListener('resize',()=>{if($('#tab-venues').classList.contains('active'))sizeVisibleFloorMaps();});
+window.addEventListener('resize',()=>{if($('#tab-venues').classList.contains('active'))sizeVisibleFloorMaps();if(!byId('tvPanel')?.hidden)renderTv();});
 setInterval(()=>{if(!viewTime().demo){renderHeader();renderProgram();renderSurveys();if($('#tab-venues').classList.contains('active'))renderVisitorMap();renderTv();}},30000);

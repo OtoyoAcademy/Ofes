@@ -362,3 +362,13 @@ details.reactions-box:not([open]) > .reaction-content {display:none;}
 
 /* Ver.1.50: TV画面のローカル日時テストを分かりやすく表示する */
 .tv-test-badge{display:inline-flex;align-items:center;border-radius:999px;background:#fff3d8;color:#704009;font-weight:800;font-size:13px;padding:4px 10px;letter-spacing:.02em}.tv-test-badge[hidden]{display:none}
+
+/* Ver.1.52: readable rotating TV slides + hide empty venue guide elements */
+#visitorMapUsage[hidden],#visitorMapLegend[hidden]{display:none!important}
+.tv-slides-control{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:12px;margin:16px auto 0;color:#315640;font-size:clamp(13px,1.25vw,18px);font-weight:700}
+.tv-slides-control button{border:1px solid #a5bbab;color:#18452f;background:#fff;border-radius:12px;padding:7px 14px;min-height:38px;font-size:inherit;font-weight:800;cursor:pointer}
+.tv-slides-control button:focus-visible{outline:3px solid #d7a43c;outline-offset:3px}
+.tv-slide-count{color:#145c39;min-width:100px;text-align:center;font-variant-numeric:tabular-nums}
+.tv-slide-hint{color:#61786a;font-size:.82em}
+@media (max-height:820px){.tv-body{gap:14px;padding:16px 24px}.tv-brand img{width:clamp(68px,9vh,110px);height:clamp(68px,9vh,110px)}.tv-brand h1{font-size:clamp(30px,5vh,60px)}.tv-brand p{font-size:clamp(17px,2vh,24px)}.tv-content{min-height:0}.tv-kicker{font-size:clamp(25px,4vh,40px);margin-bottom:10px}.tv-program-card{padding:18px}.tv-slides-control{margin-top:9px}}
+@media (max-width:760px){.tv-slides-control{gap:6px}.tv-slides-control button{padding:7px 9px}.tv-slide-hint{width:100%;text-align:center}.tv-content{min-height:0}}
