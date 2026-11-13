@@ -173,6 +173,23 @@ function setUiState() {
   }
 }
 function isAdmin(){ return !!currentIsAdmin && !!currentUser; }
+// Ver.1.49: お知らせ文面だけを最新の公開データから取得する管理者向けAPI。
+// キャッシュ済みのローカル下書きや公開スナップショットは使わない。
+window.OFESCloudNotice={
+ fetchPublished:async()=>{
+  if(!supabase)throw Error('Supabaseの接続を確認してください。');
+  if(!isAdmin())throw Error('Supabase管理者としてログインしてください。');
+  const {data,error}=await supabase.from('ofes_site_state')
+   .select('payload,updated_at').eq('id','site').maybeSingle();
+  if(error)throw Error(errorText(error));
+  if(!data?.payload)throw Error('Supabaseの公開データがありません。');
+  const doc=data.payload;
+  if(!['noticeTitle','noticeMessage','noticeIssuer'].every(k=>typeof doc[k]==='string'))
+   throw Error('公開済みデータにお知らせ文面がありません。文面を保存してから公開してください。');
+  return {year:String(doc.year||''),noticeTitle:doc.noticeTitle,noticeMessage:doc.noticeMessage,
+   noticeIssuer:doc.noticeIssuer,updatedAt:data.updated_at||null};
+ }
+};
 function jstDeadlineIso(localValue){
   const d = new Date(`${localValue}:00+09:00`);
   if(!Number.isFinite(d.getTime())) throw Error('リアクション受付終了日時の形式が正しくありません。');

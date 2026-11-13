@@ -1523,6 +1523,49 @@ byId('saveNotice').onclick=()=>{
  state.noticeIssuer=byId('noticeIssuer').value.trim()||DEFAULT_DATA.noticeIssuer;
  persist();toast('保護者向け案内文を保存しました');
 };
+// Ver.1.49: 他端末がSupabaseへ公開した「お知らせ文面」だけを編集用下書きへ取り込む。
+// 会場・プログラム等は上書きせず、パスコード入力欄も変更しない。
+let noticeFetchBusy=false;
+function noticeFetchStatus(message,kind=''){
+ const el=byId('loadPublishedNoticeStatus');if(!el)return;
+ el.textContent=message;el.classList.toggle('notice-sync-ok',kind==='ok');el.classList.toggle('notice-sync-error',kind==='error');
+}
+byId('loadPublishedNotice')?.addEventListener('click',async()=>{
+ if(noticeFetchBusy)return;
+ const btn=byId('loadPublishedNotice');
+ const read=window.OFESCloudNotice?.fetchPublished;
+ if(typeof read!=='function'){
+  noticeFetchStatus('Supabase接続の準備ができていません。ページを再読み込みしてください。','error');return;
+ }
+ noticeFetchBusy=true;btn.disabled=true;
+ noticeFetchStatus('Supabaseから公開済みの文面を確認しています…');
+ try{
+  const latest=await read(); // 読み込みのたびに最新データを問い合わせる
+  if(!latest || !['noticeTitle','noticeMessage','noticeIssuer'].every(k=>typeof latest[k]==='string'))
+   throw Error('公開済みデータにお知らせ文面がありません。文面を保存し、Supabaseへ公開してください。');
+  const keys=['noticeTitle','noticeMessage','noticeIssuer'];
+  const inputs=keys.map(k=>byId(k));
+  const inputChanged=keys.some((k,i)=>inputs[i].value!==String(state[k]||''));
+  const different=keys.some(k=>String(state[k]||'')!==latest[k]);
+  if(!different && !inputChanged){
+   noticeFetchStatus('この端末の文面は公開済みの最新版と同じです。変更はありません。','ok');return;
+  }
+  const yearDifference=latest.year && latest.year!==String(state.year);
+  const warning=yearDifference?`\n※ 公開中は${latest.year}年度ですが、この端末の下書きは${state.year}年度です。年度そのものは変更しません。\n`:'';
+  const unsavedWarning=inputChanged?'\n※ この画面で編集中の未保存の文章も上書きされます。\n':'';
+  const label=latest.updatedAt && !isNaN(new Date(latest.updatedAt).getTime())
+   ?`\n公開日時：${new Date(latest.updatedAt).toLocaleString('ja-JP')}`:'';
+  if(!confirm(`Supabaseに公開済みのお知らせ文面を、この端末の下書きに取り込みます。${label}${warning}${unsavedWarning}\n対象：文書タイトル・案内文・発行者の3項目のみ。\n会場・プログラム・パスコードなどは変更しません。\n\n取り込みますか？`)){
+   noticeFetchStatus('取り込みを中止しました。');return;
+  }
+  for(const k of keys) state[k]=latest[k];
+  if(!persist())throw Error('端末の下書きを保存できませんでした。容量やブラウザの設定を確認してください。');
+  for(let i=0;i<keys.length;i++)inputs[i].value=latest[keys[i]];
+  noticeFetchStatus('公開済みのタイトル・案内文・発行者を取り込み、端末内の下書きに保存しました。その他の設定やパスコードはそのままです。','ok');
+  toast('公開済みのお知らせ文面を取り込みました');
+ }catch(error){noticeFetchStatus(`読み込み失敗：${error?.message||error}`,'error');}
+ finally{noticeFetchBusy=false;btn.disabled=false;}
+});
 function stampFixedUrl(i){return `${STAMP_BASE_URL}?stamp=${i}`;}
 function stampQrAsset(i){return new URL(`assets/stamp-qr/stamp-${i}.svg`,location.href).href;}
 function renderStampQrAdmin(){

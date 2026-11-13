@@ -349,3 +349,13 @@ details.reactions-box:not([open]) > .reaction-content {display:none;}
 .notice-passcode-entry>input{flex:1;min-width:230px;font-size:18px;letter-spacing:.10em;max-width:440px}
 .notice-passcode-visibility{display:flex!important;align-items:center;gap:6px;white-space:nowrap;font-weight:500!important;margin:0!important}
 .notice-passcode-visibility input{width:auto!important;accent-color:#236949}
+
+/* Ver.1.49: 保護者向け文面のみの公開済みデータ取り込み */
+.notice-sync-box{margin:14px 0;padding:14px;border:1px solid #cbdad0;background:#f5f9f6;border-radius:11px}
+.notice-sync-box>strong{font-size:14px;color:#17583b}
+.notice-sync-box .caption{margin:8px 0;line-height:1.7}
+.notice-sync-box button{margin-top:4px}
+.notice-sync-box button:disabled{opacity:.55;cursor:wait}
+#loadPublishedNoticeStatus{min-height:1.5em}
+#loadPublishedNoticeStatus.notice-sync-error{color:#a12f25;font-weight:700}
+#loadPublishedNoticeStatus.notice-sync-ok{color:#176b44;font-weight:700}
