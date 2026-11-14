@@ -1,3 +1,7 @@
+# OFES Ver.1.53
+
+更新内容：会場案内の表示復元／移動準備の簡略表示／スタンプラリー全端末一括リセット。詳しくは `OFES_VER153_UPDATE_GUIDE.md` を参照してください。
+
 # OFES Ver.1.52 Supabase版
 
 ## TV表示

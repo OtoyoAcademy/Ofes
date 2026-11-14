@@ -11,6 +11,7 @@ const MAPS = [
 ];
 const STORAGE_KEY='ofes-prototype-v08'; // 旧版から維持
 const STAMP_KEY='ofes-stamp-v08';
+const STAMP_RESET_TOKEN_KEY='ofes-stamp-reset-token-v153';
 const STAMP_BASE_URL='https://otoyoacademy.github.io/Ofes/';
 const ACCESS_MODE_KEY='ofes-access-mode-v127';
 // 試作版の画面ロックのみ。Supabaseの安全な認証には使用しない。
@@ -25,13 +26,13 @@ function programKind(p){
 function programKindOptions(selected){
  return Object.entries(PROGRAM_KINDS).map(([id,label])=>`<option value="${id}" ${id===selected?'selected':''}>${label}</option>`).join('');
 }
-function isReactionTarget(p){return programKind(p)!=='none';}
+function isReactionTarget(p){return !isTransferTitle(p?.title)&&programKind(p)!=='none';}
 // 会場を使わない移動時間は、本番前チェックの会場未設定件数から除外する。
 // 演目名による自動判定に加え、管理画面で明示的な例外指定もできる。
 // 「移動販売」「移動図書館」のような発表名まで一律に除外しない。
 function isTransferTitle(title){
  const t=String(title||'').normalize('NFKC').trim();
- return /^(?:移動(?:時間|中)?|会場移動|校内移動|校舎間移動|休憩[・/／と]移動|移動[・/／と]休憩)(?:$|[\s（(【「:：・/／→-])/.test(t) || /(?:へ|に)移動(?:時間)?(?:$|[\s（(【「:：・/／→-])/.test(t);
+ return /^(?:移動(?:時間|中|準備)?|会場移動(?:準備)?|校内移動|校舎間移動|休憩[・/／と]移動|移動[・/／と]休憩)(?:$|[\s（(【「:：・/／→-])/.test(t) || /(?:へ|に)移動(?:時間)?(?:$|[\s（(【「:：・/／→-])/.test(t);
 }
 function venueNotRequired(p){return p?.venueNotRequired===true||isTransferTitle(p?.title);}
 function venueUnassigned(p,data=state){return !p.zoneId||!data.zones.some(z=>z.id===p.zoneId);}
@@ -310,6 +311,10 @@ function activePrograms(){const t=viewTime();return state.programs.filter(p=>{co
 function scheduledPrograms(){if(session==='current')return activePrograms();return state.programs.filter(p=>p.session===session)}
 function orderedPrograms(){return [...state.programs].sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||String(a.zoneId).localeCompare(String(b.zoneId))||String(a.id).localeCompare(String(b.id)))}
 function roomLabel(p){return getZone(p.zoneId)?.name||(venueNotRequired(p)?'会場指定なし':'会場未登録')}
+// 移動準備などの時間割上の案内は、発表用ステータス・会場・リアクションを表示しない。
+function isScheduleNotice(p){return isTransferTitle(p?.title);}
+function statusBadgeHtml(p){if(isScheduleNotice(p))return '';const st=programStatus(p);return `<span class="program-status status-${st.key}">${st.label}</span>`;}
+function venueMetaHtml(p){if(isScheduleNotice(p))return '';return `<span class="program-venue-meta">${esc(roomLabel(p))} <button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></span>`;}
 function renderHeader(){
  byId('heroYear').textContent=state.year;
  byId('heroSlogan').textContent=state.slogan;
@@ -319,7 +324,7 @@ function renderHeader(){
  byId('countdown').textContent=dif>0?`開催まであと ${dif} 日`:dif===0?'いよいよ本日！':'今年のおおフェスは終了しました';
  byId('previewTag').hidden=!v.demo;byId('previewTag').textContent=`TEST ${v.date} ${v.time}`;
 }
-function setTab(tab,opts={}){if(tab!=='stamp'&&stampScannerActive)closeStampScanner();$$('.nav[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$$('.tab-view').forEach(v=>v.classList.toggle('active',v.id===`tab-${tab}`));if(tab==='venues')renderVisitorMap();if(opts.scrollTop!==false)window.scrollTo({top:0,behavior:'smooth'});}
+function setTab(tab,opts={}){if(tab!=='stamp'&&stampScannerActive)closeStampScanner();$$('.nav[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$$('.tab-view').forEach(v=>v.classList.toggle('active',v.id===`tab-${tab}`));if(tab==='venues')renderVisitorMap();if(tab==='stamp')window.OFESStampControl?.refresh?.().catch(error=>console.warn('スタンプ同期確認',error));if(opts.scrollTop!==false)window.scrollTo({top:0,behavior:'smooth'});}
 $$('.nav[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 function surveyNowKey(){const v=viewTime();return `${v.date}T${v.time}`;}
 function surveyIsActive(item){if(!item||item.enabled===false||!String(item.url||'').trim())return false;const now=surveyNowKey();if(item.startAt&&now<item.startAt)return false;if(item.endAt&&now>item.endAt)return false;return true;}
@@ -361,7 +366,7 @@ function renderProgram(){
  if(v.date!==state.eventDate){
   text=`開催日：<strong>${esc(state.eventDate.replaceAll('-','/'))}</strong>`;
  }else if(active.length){
-  text=`<strong>ただいま開催中</strong><br>${active.map(p=>esc(`${p.grade?`${p.grade} `:''}${p.group?`${p.group} `:''}${p.title}`)).join('・')}`;
+  text=`<strong>${active.every(isScheduleNotice)?'移動・準備中':'ただいま開催中'}</strong><br>${active.map(p=>esc(`${p.grade?`${p.grade} `:''}${p.group?`${p.group} `:''}${p.title}`)).join('・')}`;
  }else{
   text='現在開催中のプログラムはありません。';
  }
@@ -385,7 +390,7 @@ function renderProgram(){
    const d=sessionDef(unit.sid);
    const statuses=unit.programs.map(programStatus);
    const st=statuses.some(x=>x.key==='live')?{key:'live',label:'発表中'}:(statuses.every(x=>x.key==='ended')?{key:'ended',label:'終了しました'}:{key:'upcoming',label:'発表予定'});
-   const items=unit.programs.slice().sort((a,b)=>String(roomLabel(a)).localeCompare(String(roomLabel(b)))).map(p=>`<div class="session-program-item"><div class="session-program-main"><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`).join('');
+   const items=unit.programs.slice().sort((a,b)=>String(roomLabel(a)).localeCompare(String(roomLabel(b)))).map(p=>`<div class="session-program-item"><div class="session-program-main"><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<div class="where">${venueMetaHtml(p)}</div>${isScheduleNotice(p)?'':reactionsHtml(p)}</div></div>`).join('');
    return `<details data-fold-key="session-${esc(unit.sid)}" class="program-session-group ${st.key==='live'?'on':''}" ${programGroupOpen(`session-${unit.sid}`,st.key==='live')?'open':''}><summary class="program-session-summary"><span class="time">${esc(d.start)}</span><span class="session-summary-main"><strong>${esc(d.label)}</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(d.start)}〜${esc(d.end)}　${unit.programs.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
   }
   if(unit.type==='volunteer-group'){
@@ -394,11 +399,11 @@ function renderProgram(){
    const anyLive=ps.some(p=>programStatus(p).key==='live');
    const allEnded=ps.every(p=>programStatus(p).key==='ended');
    const st=anyLive?{key:'live',label:'発表中'}:(allEnded?{key:'ended',label:'終了しました'}:{key:'upcoming',label:'発表予定'});
-   const items=ps.map(p=>{const pt=programTimes(p),pst=programStatus(p);return `<div class="session-program-item"><div class="session-program-main"><div class="afternoon-program-time">${esc(pt.start)}〜${esc(pt.end)} <span class="program-status status-${pst.key}">${pst.label}</span></div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<div class="where">${esc(roomLabel(p))}</div>${reactionsHtml(p)}</div><button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>`}).join('');
+   const items=ps.map(p=>{const pt=programTimes(p),pst=programStatus(p);return `<div class="session-program-item"><div class="session-program-main"><div class="afternoon-program-time">${esc(pt.start)}〜${esc(pt.end)} ${statusBadgeHtml(p)}</div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<div class="where">${venueMetaHtml(p)}</div>${isScheduleNotice(p)?'':reactionsHtml(p)}</div></div>`}).join('');
    return `<details data-fold-key="volunteer" class="program-session-group afternoon-program-group ${st.key==='live'?'on':''}" ${programGroupOpen('volunteer',st.key==='live')?'open':''}><summary class="program-session-summary"><span class="time">${esc(first.start)}</span><span class="session-summary-main"><strong>有志発表</strong><span class="program-status status-${st.key}">${st.label}</span><span class="where">${esc(first.start)}〜${esc(last.end)}　${ps.length}発表</span></span><span class="session-fold-icon" aria-hidden="true">⌄</span></summary><div class="session-program-items">${items}</div></details>`;
   }
   const p=unit.p,pt=programTimes(p),st=programStatus(p);
-  return `<div class="program-row ${st.key==='live'?'on':''}"><div class="time">${esc(pt.start)}</div><div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}<span class="program-status status-${st.key}">${st.label}</span><div class="where">${esc(sessionLabel(p.session))}　${esc(pt.start)}〜${esc(pt.end)}　${esc(roomLabel(p))} <button type="button" class="minilink" data-see="${esc(p.zoneId)}" ${p.zoneId?'':'disabled'}>会場を見る</button></div>${reactionsHtml(p)}</div></div>`;
+  return `<div class="program-row ${st.key==='live'?'on':''}"><div class="time">${esc(pt.start)}</div><div><strong>${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</strong>${presentersHtml(p,true)}${statusBadgeHtml(p)}<div class="where">${esc(sessionLabel(p.session))}　${esc(pt.start)}〜${esc(pt.end)} ${venueMetaHtml(p)}</div>${isScheduleNotice(p)?'':reactionsHtml(p)}</div></div>`;
  }).join('');
  $$('[data-see]').forEach(b=>b.onclick=()=>{
   if(!b.dataset.see)return;
@@ -474,11 +479,11 @@ function floorDetailHtml(m){
  const scheduledIds=new Set(scheduledPrograms().map(p=>p.id));
  let ps=state.programs.filter(p=>p.zoneId===z.id&&scheduledIds.has(p.id)).slice();
  if(reactionPreviewMode&&reactionPreviewProgram?.zoneId===z.id&&!ps.some(p=>p.id===reactionPreviewProgram.id))ps.push(reactionPreviewProgram);
- if(!ps.length)return '';
+ if(!ps.length)return `<h4>${esc(z.name)}</h4>${z.note?`<p>${esc(z.note)}</p>`:''}`;
  ps.sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||timeNum(programTimes(a).end)-timeNum(programTimes(b).end)||String(a.id).localeCompare(String(b.id)));
  return `<h4>${esc(z.name)} <span class="pill">${esc(z.id)}</span></h4>${z.note?`<p>${esc(z.note)}</p>`:''}
  <p class="muted">${esc(m.name)}　登録されている発表：${ps.length}件</p>
- <div class="venue-program-list">${ps.map(p=>{const pt=programTimes(p),st=programStatus(p);return `<article class="venue-program-item status-border-${st.key}"><div class="venue-program-meta"><span class="program-status status-${st.key}">${st.label}</span><strong>${esc(sessionLabel(p.session))}</strong><span>${esc(pt.start)}〜${esc(pt.end)}</span></div><div class="venue-program-title">${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</div>${presentersHtml(p)}${reactionsHtml(p)}</article>`}).join('')}</div>`;
+ <div class="venue-program-list">${ps.map(p=>{const pt=programTimes(p),st=programStatus(p);return `<article class="venue-program-item status-border-${st.key}"><div class="venue-program-meta">${statusBadgeHtml(p)}<strong>${esc(sessionLabel(p.session))}</strong><span>${esc(pt.start)}〜${esc(pt.end)}</span></div><div class="venue-program-title">${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</div>${presentersHtml(p)}${isScheduleNotice(p)?'':reactionsHtml(p)}</article>`}).join('')}</div>`;
 }
 function updateSelectedFloorDetails(){
  $$('#visitorMaps [data-zone]').forEach(b=>{
@@ -559,19 +564,18 @@ function renderVisitorMap(){
  if(byId('safetyLegend'))byId('safetyLegend').hidden=!safetyPublished||!safetyVisible;
  const maps=visibleMaps();
  const programs=scheduledPrograms(),activeIds=new Set(programs.map(p=>p.zoneId).filter(Boolean));
- const count=state.zones.filter(z=>maps.some(m=>m.id===z.mapId)&&activeIds.has(z.id)).length;
- // Public venue guide shows only rooms scheduled for the chosen slot.
- // The administrator's map continues to show all saved venue registrations.
- if(visitorSelected&&!activeIds.has(visitorSelected))visitorSelected='';
- const mapVisible=maps.filter(m=>state.zones.some(z=>z.mapId===m.id&&activeIds.has(z.id)));
+ const count=state.zones.filter(z=>maps.some(m=>m.id===z.mapId)).length;
+ // 登録済みの場所は発表がない時間帯でも表示する。色だけ現在の発表有無に連動。
+ if(visitorSelected&&!state.zones.some(z=>z.id===visitorSelected))visitorSelected='';
+ const mapVisible=maps;
  const buildingName={campus:'学校全体',zenki:'前期棟',koki:'後期棟'}[visitorBuilding];
- byId('mapSummary').textContent=session==='current'?`現在：${viewTime().time}　${buildingName}で使用中の会場：${count}か所`:`${sessionLabel(session)}（${sessionDef(session).start}〜${sessionDef(session).end}）　${buildingName}で使用する会場：${count}か所`;
+ byId('mapSummary').textContent=session==='current'?`現在：${viewTime().time}　${buildingName}の登録済み会場：${count}か所`:`${sessionLabel(session)}（${sessionDef(session).start}〜${sessionDef(session).end}）　${buildingName}の登録済み会場：${count}か所`;
  const legend=byId('visitorMapLegend');if(legend)legend.hidden=count===0;
  const usage=byId('visitorMapUsage');if(usage)usage.hidden=count===0;
  byId('visitorMaps').innerHTML=mapVisible.map(m=>{
-  const zones=state.zones.filter(z=>z.mapId===m.id&&activeIds.has(z.id)),floorCount=zones.length;
+  const zones=state.zones.filter(z=>z.mapId===m.id),floorCount=zones.length;
   return `<article class="floor-card" id="floor-${esc(m.id)}">
-   <div class="floor-card-header"><div><h3>${esc(floorLabel(m))}</h3><span class="floor-subtitle">${esc(m.name)}</span></div><span class="floor-count">${floorCount}か所 使用</span></div>
+   <div class="floor-card-header"><div><h3>${esc(floorLabel(m))}</h3><span class="floor-subtitle">${esc(m.name)}</span></div><span class="floor-count">${floorCount}か所 登録</span></div>
    <div class="floor-tools"><span>図を拡大して会場をタップ</span><div class="floor-zoom"><button type="button" data-zoom-map="${m.id}" data-zoom-action="out" aria-label="${esc(m.name)}を縮小">−</button><span id="zoom-${m.id}">${visitorZoom[m.id]}%</span><button type="button" data-zoom-map="${m.id}" data-zoom-action="in" aria-label="${esc(m.name)}を拡大">＋</button><button type="button" class="zoom-reset" data-zoom-map="${m.id}" data-zoom-action="reset">戻す</button></div></div>
    <div class="floor-map-window ${m.id==='campus'?'campus-window':''}" id="window-${m.id}" data-map="${m.id}">
     <div class="map-stage ${m.id==='campus'?'campus-canvas':''}" id="stage-${m.id}" style="width:${visitorZoom[m.id]}%">
@@ -595,6 +599,27 @@ function renderVisitorMap(){
  }));
  enableMapPinch();sizeVisibleFloorMaps();updateSelectedFloorDetails();
 }
+// Ver.1.53: 各端末の保存領域はそのまま使い、Supabaseの共通リセット識別子で無効化する。
+// 別端末でオフラインだった場合も、次回公開データを取得した時点で反映する。
+function applyRemoteStampReset(token){
+ const next=String(token||'').trim();
+ if(!next)return; // 旧版データに識別子がない場合は既存スタンプを変更しない
+ try{
+  const last=localStorage.getItem(STAMP_RESET_TOKEN_KEY)||'';
+  if(last===next)return;
+  localStorage.removeItem(STAMP_KEY);
+  localStorage.setItem(STAMP_RESET_TOKEN_KEY,next);
+  renderStamps();
+  showStampMessage('管理者がスタンプラリーを一括リセットしました。スタンプは0/5になりました。','info');
+ }catch(error){console.warn('スタンプ一括リセットを端末に反映できませんでした',error);}
+}
+window.addEventListener('ofes-cloud-published',event=>{
+ applyRemoteStampReset(event.detail?.data?.stampResetToken);
+ if(event.detail?.data && pendingStampFromUrl!==null)finishPendingStampFromUrl();
+});
+window.addEventListener('ofes-stamp-reset',event=>applyRemoteStampReset(event.detail?.token));
+// 同一端末内の別タブでローカルスタンプが変更された場合も画面へ反映。
+window.addEventListener('storage',event=>{if(event.key===STAMP_KEY||event.key===STAMP_RESET_TOKEN_KEY)renderStamps();});
 function stampList(){
  try{
   const raw=JSON.parse(localStorage.getItem(STAMP_KEY)||'[]');
@@ -644,10 +669,21 @@ function acceptStampNumber(n,source='camera'){
  }else{showStampMessage(`STAMP ${n} はすでに取得済みです。`,'info');}
  return true;
 }
+// QRから開いた初回はSupabase側のリセット識別子を確認してから取得する。
+// リセット未受信のままスタンプを先に記録し、直後に消えてしまう競合を避ける。
+let pendingStampFromUrl=null;
+function finishPendingStampFromUrl(){
+ const n=pendingStampFromUrl;if(n===null)return;
+ pendingStampFromUrl=null;
+ acceptStampNumber(n,'url');renderStamps();
+}
 function readStampFromUrl(){
  const n=parseStampQrValue(location.href);if(!n)return;
- acceptStampNumber(n,'url');renderStamps();setTab('stamp');
+ pendingStampFromUrl=n;
+ setTab('stamp');
  try{history.replaceState(null,'',location.pathname+location.hash);}catch{}
+ // オフラインのときもスタンプを取得できるよう、同期が来なければ一定時間後に保存。
+ setTimeout(finishPendingStampFromUrl,8000);
 }
 
 // Ver.1.26: OFES内でカメラを起動してQRを読み取り、同じアプリのlocalStorageに保存する。
@@ -814,7 +850,7 @@ byId('entryAdmin')?.addEventListener('click',()=>{hideEntryGate();byId('openAdmi
 const TV_PAGE_DURATION=8000;
 let tvSlideIndex=0,tvSlideCount=1,tvSlideKey='',tvSlideLastChange=Date.now(),tvSlidePaused=false;
 function tvPeople(p){const names=currentPresenterNames(p);const publicPeople=[p.grade,p.group].filter(Boolean).join(' ');return names?`${publicPeople}${publicPeople?' / ':''}${names}`:(publicPeople||'発表者');}
-function tvProgramCard(p){const pt=programTimes(p);const place=getZone(p.zoneId);return `<article class="tv-program-card"><div class="tv-time">${esc(pt.start)}〜${esc(pt.end)}</div><h2>${esc(p.title)}</h2><div class="tv-meta">${place?`<span>📍 ${esc(place.name)}</span>`:''}<span>👥 ${esc(tvPeople(p))}</span></div></article>`;}
+function tvProgramCard(p){const pt=programTimes(p);if(isScheduleNotice(p))return `<article class="tv-program-card tv-schedule-notice"><div class="tv-time">${esc(pt.start)}〜${esc(pt.end)}</div><h2>${esc(p.title)}</h2></article>`;const place=getZone(p.zoneId);return `<article class="tv-program-card"><div class="tv-time">${esc(pt.start)}〜${esc(pt.end)}</div><h2>${esc(p.title)}</h2><div class="tv-meta">${place?`<span>📍 ${esc(place.name)}</span>`:''}<span>👥 ${esc(tvPeople(p))}</span></div></article>`;}
 function tvSlidesFor(label,items){
  const panel=byId('tvPanel'),content=byId('tvContent');
  // A laptop/portrait display gets one large card; a full-size landscape TV gets two.
@@ -836,13 +872,13 @@ function renderTv(){
  const singleScreen=html=>{tvSlideKey='';tvSlideCount=1;tvSlideIndex=0;content.innerHTML=html;};
  if(v.date<state.eventDate){const now=new Date(v.date+'T00:00:00'),event=new Date(state.eventDate+'T00:00:00'),days=Math.max(0,Math.round((event-now)/86400000));singleScreen(`<div class="tv-message countdown"><span>おおフェスまで</span><strong>あと ${days} 日</strong><p>${esc(jpEventDate(state.eventDate))}</p></div>`);return;}
  if(v.date>state.eventDate){singleScreen('<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>');return;}
- const active=activePrograms();if(active.length){tvSlidesFor('ただいま開催中',active);return;}
+ const active=activePrograms();if(active.length){tvSlidesFor(active.every(isScheduleNotice)?'移動・準備中':'ただいま開催中',active);return;}
  const starts=all.map(p=>timeNum(programTimes(p).start));const ends=all.map(p=>timeNum(programTimes(p).end));const first=starts.length?Math.min(...starts):9999,last=ends.length?Math.max(...ends):-1;
  const deadlineTime=state.reactionDeadline?.startsWith(state.eventDate)?timeNum(state.reactionDeadline.slice(11,16)):17*60;
  if(v.minute<first){singleScreen('<div class="tv-message"><strong>本日、おおフェス開催！</strong><p>まもなくプログラムが始まります。</p></div>');return;}
  if(v.minute>=last){if(v.minute<deadlineTime){singleScreen(`<div class="tv-message reaction"><strong>本日のプログラムは終了しました。</strong><p>リアクションは <b>${esc(state.reactionDeadline.slice(11,16))}</b> まで受付中です。<br>ぜひ発表への感想を届けてください。</p></div>`);}else{singleScreen('<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>');}return;}
  const next=all.filter(p=>timeNum(programTimes(p).start)>v.minute);const nextStart=next.length?Math.min(...next.map(p=>timeNum(programTimes(p).start))):null;const group=nextStart===null?[]:next.filter(p=>timeNum(programTimes(p).start)===nextStart);
- if(group.length)tvSlidesFor('次のプログラム',group);else singleScreen('<div class="tv-message"><strong>次のプログラムを準備中です。</strong></div>');
+ if(group.length)tvSlidesFor(group.every(isScheduleNotice)?'次の予定':'次のプログラム',group);else singleScreen('<div class="tv-message"><strong>次のプログラムを準備中です。</strong></div>');
 }
 byId('tvContent')?.addEventListener('click',e=>{
  const btn=e.target.closest?.('[data-tv-slide]');if(!btn)return;
@@ -868,6 +904,17 @@ async function compressStampImage(file){
 byId('stampCompleteImageFile')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;const msg=byId('stampCompleteImageMessage');msg.textContent='画像を調整しています…';try{state.stampCompleteImage=await compressStampImage(f);if(!persist())throw Error('ブラウザへ保存できませんでした。');renderStampQrAdmin();renderStamps();msg.textContent='画像を保存しました。「データ保存」からSupabaseへ公開すると来場者にも反映されます。';}catch(err){msg.textContent=`画像を保存できませんでした：${err.message}`;}finally{e.target.value='';}});
 byId('removeStampCompleteImage')?.addEventListener('click',()=>{if(!state.stampCompleteImage)return;state.stampCompleteImage='';persist();renderStampQrAdmin();renderStamps();byId('stampCompleteImageMessage').textContent='画像を削除しました。';});
 byId('saveStampHints')?.addEventListener('click',()=>{state.stampHints=Array.from({length:5},(_,i)=>String(byId(`stampHint${i+1}`)?.value||'').trim());persist();renderStamps();const msg=byId('stampHintMessage');if(msg)msg.textContent='ヒントを保存しました。「データ保存」からSupabaseへ公開すると来場者にも反映されます。';toast('スタンプのヒントを保存しました');});
+// 全端末の一括リセットはSupabase管理者認証後のみ。公開データは維持し、スタンプだけ失効させる。
+byId('resetAllStampProgress')?.addEventListener('click',async()=>{
+ const btn=byId('resetAllStampProgress'),msg=byId('stampGlobalResetMessage');
+ if(!window.OFESStampControl?.resetAll){msg.textContent='Supabase接続の準備ができていません。';return;}
+ if(!confirm('【全端末のスタンプ一括リセット】\n\nすべての来場者・児童生徒のスタンプ取得状況を0/5に戻します。\n元に戻すことはできません。実行しますか？'))return;
+ if(prompt('誤操作防止のため「リセット」と入力してください。')!=='リセット'){msg.textContent='操作を中止しました。';return;}
+ btn.disabled=true;msg.textContent='Supabaseへ一括リセットを反映しています…';
+ try{await window.OFESStampControl.resetAll();msg.textContent='全端末のリセット指示を公開しました。通信中の端末は順次反映され、未接続の端末は次回接続時に0/5になります。';toast('全端末のスタンプリセットを実行しました');}
+ catch(error){msg.textContent='実行できませんでした：'+String(error?.message||error);}
+ finally{btn.disabled=false;}
+});
 byId('resetStampProgress')?.addEventListener('click',()=>{const current=stampList();if(!current.length){const msg=byId('stampResetMessage');if(msg)msg.textContent='この端末には取得済みスタンプがありません。';return;}if(!confirm(`この端末で取得済みのスタンプ ${current.length}個をすべてリセットします。よろしいですか？`))return;try{localStorage.removeItem(STAMP_KEY);renderStamps();showStampMessage('この端末のスタンプ取得状況をリセットしました。','info');const msg=byId('stampResetMessage');if(msg)msg.textContent='①〜⑤の取得状況をすべてリセットしました。もう一度QRコードを読み取れます。';toast('スタンプ取得状況をリセットしました');}catch(err){const msg=byId('stampResetMessage');if(msg)msg.textContent='リセットできませんでした。ブラウザの保存設定をご確認ください。';}});
 
 async function renderYearArchives(){

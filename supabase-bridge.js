@@ -190,6 +190,40 @@ window.OFESCloudNotice={
    noticeIssuer:doc.noticeIssuer,updatedAt:data.updated_at||null};
  }
 };
+// Ver.1.53: 既存の ofes_site_state.payload 内でグローバルスタンプリセットを共有。
+// 専用SQLや新しいテーブルは不要。書き込みは ofes_admins 登録済み管理者のみ（既存RLS）。
+window.OFESStampControl={
+ refresh:async()=>{
+  if(!supabase)return;
+  const {data,error}=await supabase.from('ofes_site_state').select('payload').eq('id','site').maybeSingle();
+  if(error)throw Error(errorText(error));
+  const token=String(data?.payload?.stampResetToken||'');
+  window.dispatchEvent(new CustomEvent('ofes-stamp-reset',{detail:{token}}));
+ },
+ resetAll:async()=>{
+  if(!supabase||!isAdmin())throw Error('SupabaseのOFES管理者としてログインしてください。');
+  // 毎回サーバーの最新データからスタンプ用の識別子だけ書き換える。
+  const {data,error:readError}=await supabase.from('ofes_site_state').select('payload').eq('id','site').maybeSingle();
+  if(readError)throw Error(errorText(readError));
+  if(!data?.payload)throw Error('公開データがありません。先にSupabaseへ公開してください。');
+  const stampResetToken=(typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():`${Date.now()}-${Math.random()}`;
+  const payload={...data.payload,stampResetToken};
+  const {data:changed,error:updateError}=await supabase.from('ofes_site_state').update({payload,updated_at:new Date().toISOString(),updated_by:currentUser.id}).eq('id','site').select('payload').single();
+  if(updateError)throw Error(errorText(updateError));
+  if(changed?.payload?.stampResetToken!==stampResetToken)throw Error('一括リセットの保存を確認できませんでした。');
+  // 更新した行を再取得し、自端末にも反映する。ほかの端末はRealtime・再訪時の取得で反映。
+  await fetchPublished();
+ }
+};
+// 復元や下書き公開が、すでに実行済みのスタンプリセットを取り消さないよう保護。
+async function retainLatestStampResetToken(payload){
+ const {data,error}=await supabase.from('ofes_site_state').select('payload').eq('id','site').maybeSingle();
+ if(error)throw Error(errorText(error));
+ const stampResetToken=String(data?.payload?.stampResetToken||'');
+ return stampResetToken?{...payload,stampResetToken}:payload;
+}
+// 別タブでの滞留やスリープ復帰に備えて最新のリセット指示を確認する。
+window.addEventListener('visibilitychange',()=>{if(!document.hidden)window.OFESStampControl.refresh().catch(console.warn);});
 function jstDeadlineIso(localValue){
   const d = new Date(`${localValue}:00+09:00`);
   if(!Number.isFinite(d.getTime())) throw Error('リアクション受付終了日時の形式が正しくありません。');
@@ -212,6 +246,7 @@ async function refreshSessionUi(userOverride=undefined){
   if(account)account.hidden=!signed;
   window.dispatchEvent(new CustomEvent('ofes-reaction-uid',{detail:{uid:currentUser?.id||''}}));
   setUiState();
+  if(el('resetAllStampProgress'))el('resetAllStampProgress').disabled=!currentIsAdmin;
   if(el('reactionClearAll'))el('reactionClearAll').disabled=!currentIsAdmin;
   if(el('reactionRestoreLatest')&&!currentIsAdmin)el('reactionRestoreLatest').disabled=true;
   if(signed){
@@ -317,7 +352,7 @@ async function restoreCachedReactions(){
   const map=new Map((data||[]).map(r=>[r.program_id,Array.isArray(r.selected)?r.selected:[]]));
   ids.forEach(id=>{const selected=map.get(id)||[];cacheSelection(date,id,uid,selected);emitSelection(id,selected,uid);});
 }
-function isReactionTargetProgram(p){return !!p&&(p.programKind?['reaction','volunteer'].includes(p.programKind):['s1','s2','s3','s4'].includes(p.session));}
+function isReactionTargetProgram(p){if(!p||/^(?:移動(?:時間|中|準備)?|会場移動(?:準備)?|校内移動|校舎間移動)(?:$|[\s（(【「:：・/／→-])/.test(String(p.title||'').normalize('NFKC').trim()))return false;return p.programKind?['reaction','volunteer'].includes(p.programKind):['s1','s2','s3','s4'].includes(p.session);}
 function sessionText(p){if(['s1','s2','s3','s4'].includes(p.session)){const d=publishedData?.sessions?.[p.session];return d?.label||({s1:'セッション①',s2:'セッション②',s3:'セッション③',s4:'セッション④'}[p.session]||p.session);}return p.session==='afternoon'?'午後':'その他';}
 function zoneText(p){return publishedData?.zones?.find(z=>z.id===p.zoneId)?.name||(p.zoneId||'会場未設定');}
 function gradeLabels(gradeText){const text=String(gradeText||'').trim();const nums=[...new Set((text.match(/\d+/g)||[]).map(Number).filter(n=>n>=1&&n<=9))].sort((a,b)=>a-b);return nums.length?nums.map(n=>`${n}年生`):[text||'全体・その他'];}
@@ -507,7 +542,8 @@ publishButton?.addEventListener('click',async()=>{
     status(publishMessage,'大豊学園関係者用データを安全に保存しています…','loading');
     await saveInternalFromDraft();
     status(publishMessage,'Supabaseへ公開しています。画面を閉じずにお待ちください…','loading');
-    const row={id:'site',payload,event_date:payload.eventDate,reaction_deadline_at:jstDeadlineIso(payload.reactionDeadline),reaction_revision:Number(publishedData?.reactionRevision||0),updated_at:new Date().toISOString(),updated_by:currentUser.id};
+    const safePayload=await retainLatestStampResetToken(payload);
+    const row={id:'site',payload:safePayload,event_date:payload.eventDate,reaction_deadline_at:jstDeadlineIso(payload.reactionDeadline),reaction_revision:Number(publishedData?.reactionRevision||0),updated_at:new Date().toISOString(),updated_by:currentUser.id};
     const { error }=await supabase.from('ofes_site_state').upsert(row,{onConflict:'id'});if(error)throw error;
     await fetchPublished();await fetchAdminInternal(payload.year);status(publishMessage,backupPoint?`Supabaseへの公開が完了しました。公開前の復元ポイント ${backupPoint.backupId} も保存しました。`:'Supabaseへの初回公開が完了しました。別の端末でも同じ内容を閲覧できます。','ok');
   }catch(error){status(publishMessage,`公開に失敗：${errorText(error)}${publishedData?'（公開前バックアップに失敗した場合、新しい内容は公開していません）':''}`,'error');}
@@ -519,7 +555,7 @@ restorePublishedButton?.addEventListener('click',async()=>{
   isBusy=true;setUiState();
   try{
     if(publishedData){status(publicationBackupMessage,'復元前の現在状態を安全用の復元ポイントへ保存しています…','loading');await createPublicationBackup('pre-restore');}
-    status(publicationBackupMessage,'直前の公開状態へ復元しています…','loading');const payload=point.data;if(!payload)throw Error('復元ポイントのデータが不完全です。');
+    status(publicationBackupMessage,'直前の公開状態へ復元しています…','loading');const snapshot=point.data;if(!snapshot)throw Error('復元ポイントのデータが不完全です。');const payload=await retainLatestStampResetToken(snapshot);
     const { error }=await supabase.from('ofes_site_state').upsert({id:'site',payload,event_date:payload.eventDate,reaction_deadline_at:jstDeadlineIso(payload.reactionDeadline),reaction_revision:Number(publishedData?.reactionRevision||0),updated_at:new Date().toISOString(),updated_by:currentUser.id},{onConflict:'id'});if(error)throw error;
     if(point.internalPayload){const {error:internalError}=await supabase.rpc('admin_save_ofes_internal',{p_year:String(payload.year||point.sourceYear||''),p_passcode:'',p_payload:point.internalPayload});if(internalError)throw internalError;}
     await fetchPublished();await fetchAdminInternal(payload.year||point.sourceYear||'');status(publicationBackupMessage,'直前の公開状態へ復元しました。来場者画面にも反映されます。復元前の状態も保存済みです。','ok');
