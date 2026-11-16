@@ -11,14 +11,15 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="OFES">
-  <link rel="stylesheet" href="style.css?v=156">
+  <link rel="stylesheet" href="style.css?v=157">
   <script defer src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="assets/vendor/jszip.min.js"></script>
-  <script defer src="app.js?v=156"></script>
+  <script defer src="draft-sync.js?v=157"></script>
+  <script defer src="app.js?v=157"></script>
   <script defer src="photo-collage.js?v=143"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script type="module" src="supabase-bridge.js?v=153"></script>
-  <script type="module" src="handover.js?v=156"></script>
+  <script type="module" src="supabase-bridge.js?v=157"></script>
+  <script type="module" src="handover.js?v=157"></script>
 </head>
 <body>
 <!-- Ver.1.43: Supabaseパスワード再設定リンクから開ける独立画面 -->
@@ -164,7 +165,15 @@
 <div id="loginModal" class="modal admin-login-modal" hidden><div class="modal-inner"><h2>管理画面を開く</h2><p class="muted">このパスワードは管理画面を開くための簡易ロックです。Supabaseの書き込み権限は、別途Supabase Authで管理します。</p><form id="loginForm"><label>管理者パスワード<input type="password" id="adminPassword" required autocomplete="current-password"></label><p id="loginError" class="error"></p><div class="modal-actions"><button type="button" class="btn light" id="cancelLogin">キャンセル</button><button type="submit" class="btn primary">ログイン</button></div></form></div></div>
 
 <section id="adminPanel" class="admin-panel" hidden>
-  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.56 · 会場案内・開催終了後の表示・引き継ぎ</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
+  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.57 · 管理者用の共有下書き</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
+  <div class="draft-sync-panel">
+    <p id="draftSyncStatus" role="status">Supabase接続を確認しています…</p>
+    <div class="row-actions">
+      <button type="button" id="draftSyncStart" class="btn primary" hidden>この端末の下書きから共有を開始</button>
+      <button type="button" id="draftSyncRefresh" class="btn light" hidden>共有下書きを確認</button>
+      <button type="button" id="draftSyncBackup" class="btn light" hidden>切替前のJSONを書き出す</button>
+    </div>
+  </div>
   <nav class="admin-tabs" id="adminNav" aria-label="管理項目"><button data-admin="preflight" class="active">✅ 本番前チェック</button><button data-admin="firebase">🔑 Supabase接続</button><button data-admin="venues">会場・配置図</button><button data-admin="program">プログラム</button><button data-admin="reactions">リアクション集計</button><button data-admin="photos">📷 写真コラージュ</button><button data-admin="basic">年度・時刻テスト</button><button data-admin="surveys">アンケート</button><button data-admin="notice">お知らせPDF</button><button data-admin="stampqr">スタンプQR</button><button data-admin="years">年度データ</button><button data-admin="data">データ保存</button><button data-admin="handover">引き継ぎマニュアル</button></nav>
 
 
@@ -219,7 +228,7 @@
 </div>
 
   <div class="admin-page" id="admin-venues">
-    <div class="admin-intro"><b>使い方</b>　①図面を選ぶ → ②会場または安全情報を登録 → ③地図上で位置を指定 → ④内容を保存します。会場・消火器・非常口・AED・避難集合場所・避難経路を同じ画面で管理できます。<p class="caption"><strong>学校全体図：</strong>図の上側・下側に縦長の登録用余白があります。駐車場や臨時案内場所なども、通常の会場と同じ方法で登録できます。Ver.1.28までの学校全体図上の会場・安全情報は新しい余白へ自動補正されるため、原則として再登録は不要です。図面位置の編集を来場者へ反映するには「データ保存」→「Supabaseへ公開」を実行してください。</p><p class="caption"><strong>Excel一括入力：</strong>ここで会場名を登録・保存すると、「プログラム」→「Excel入力様式をダウンロード」でその時点の会場名とセッション①〜④の共通時間がExcelへ自動反映されます。<strong>会場IDやセッション時間をExcelへ手で転記する必要はありません。</strong> 会場名を変更した場合はExcelを再ダウンロードしてください。</p><p class="caption"><strong>重要：</strong>編集内容は一度このブラウザの「下書き」に保存されます。来場者へ反映するには「データ保存」タブの「Supabaseへ公開」を押してください。JSONバックアップも残せます。</p></div>
+    <div class="admin-intro"><b>使い方</b>　①図面を選ぶ → ②会場または安全情報を登録 → ③地図上で位置を指定 → ④内容を保存します。会場・消火器・非常口・AED・避難集合場所・避難経路を同じ画面で管理できます。<p class="caption"><strong>学校全体図：</strong>図の上側・下側に縦長の登録用余白があります。駐車場や臨時案内場所なども、通常の会場と同じ方法で登録できます。Ver.1.28までの学校全体図上の会場・安全情報は新しい余白へ自動補正されるため、原則として再登録は不要です。図面位置の編集を来場者へ反映するには「データ保存」→「Supabaseへ公開」を実行してください。</p><p class="caption"><strong>Excel一括入力：</strong>ここで会場名を登録・保存すると、「プログラム」→「Excel入力様式をダウンロード」でその時点の会場名とセッション①〜④の共通時間がExcelへ自動反映されます。<strong>会場IDやセッション時間をExcelへ手で転記する必要はありません。</strong> 会場名を変更した場合はExcelを再ダウンロードしてください。</p><p class="caption"><strong>重要：</strong>編集後は管理画面上部の「同期済み」を確認してください。来場者へ反映するには「データ保存」タブの「Supabaseへ公開」を押してください。JSONバックアップも残せます。</p></div>
     <div class="admin-venue-layout">
       <div class="admin-canvas-col">
         <div class="admin-canvas-tools"><label>配置図を選択<select id="adminMapSelect"></select></label><div class="tool-buttons"><button id="newVenue" class="btn primary">＋ 新規会場</button><button id="redrawVenue" class="btn light">位置を指定し直す</button><button id="cancelDrawing" class="btn light">選択解除</button></div></div>
@@ -238,7 +247,7 @@
             <label>種類<select id="zoneKind"><option value="classroom">教室</option><option value="exhibit">展示場所</option><option value="hall">体育館・ホール</option><option value="building">建物</option><option value="parking">駐車場・入口</option><option value="other">その他</option></select></label>
             <div class="four-cols"><label>左位置 %<input id="zoneX" type="number" min="0" max="100" step="0.1"></label><label>上位置 %<input id="zoneY" type="number" min="0" max="100" step="0.1"></label><label>幅 %<input id="zoneW" type="number" min="0.1" max="100" step="0.1"></label><label>高さ %<input id="zoneH" type="number" min="0.1" max="100" step="0.1"></label></div>
             <div class="row-actions"><button type="submit" class="btn primary" aria-describedby="venuePublishHint">この会場を保存</button><button type="button" id="attachDemo" class="btn light">リアクション表示を試す</button><button type="button" id="deleteVenue" class="btn danger">削除</button></div>
-            <p class="caption" id="venuePublishHint">このブラウザの下書きに保存します。来場者の端末にも表示するには、管理画面の「データ保存」→「Supabaseへ公開」を押してください。</p>
+            <p class="caption" id="venuePublishHint">保存後、管理画面上部に「同期済み」と表示されると別の端末で編集を続けられます。来場者への反映は「データ保存」→「Supabaseへ公開」で行います。</p>
             <p class="caption reaction-test-note">発表をまだ登録していない会場でも、セッション①の仮発表でリアクションの見え方を試せます。本番で記録・集計するには「プログラム」でセッション・学年・発表内容を登録し、Supabaseへ公開してください。</p>
           </form>
         </div>
@@ -265,7 +274,7 @@
   </div>
 
   <div class="admin-page" id="admin-program">
-    <div class="admin-intro"><strong>入力は2段階です。</strong> ①セッション①〜④の時間帯を設定 → ②会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。同じ時間帯を会場ごとに繰り返し入力する必要はありません。<p class="caption"><strong>児童生徒名：</strong>一般来場者には表示されません。「大豊学園」入口から年度用パスコードで入った関係者と管理者だけに表示します。個人名は必ず専用の「児童生徒名」欄へ入力してください。</p><p class="caption"><strong>リアクション区分：</strong>「リアクション対象」「リアクションなし」「有志発表（リアクション対象）」から発表ごとに指定します。有志発表だけが折りたたまれ、その他の午後行事は個別表示されます。<br><strong>公開：</strong>変更はこのブラウザの下書きに保存されます。内容を確認後、「データ保存」から「Supabaseへ公開」を押すと来場者へ反映されます。</p></div>
+    <div class="admin-intro"><strong>入力は2段階です。</strong> ①セッション①〜④の時間帯を設定 → ②会場を選び、セッション・発表学年（複数可）・発表グループ・発表内容を登録します。同じ時間帯を会場ごとに繰り返し入力する必要はありません。<p class="caption"><strong>児童生徒名：</strong>一般来場者には表示されません。「大豊学園」入口から年度用パスコードで入った関係者と管理者だけに表示します。個人名は必ず専用の「児童生徒名」欄へ入力してください。</p><p class="caption"><strong>リアクション区分：</strong>「リアクション対象」「リアクションなし」「有志発表（リアクション対象）」から発表ごとに指定します。有志発表だけが折りたたまれ、その他の午後行事は個別表示されます。<br><strong>公開：</strong>保存後、管理画面上部で共有下書きへの同期状況を確認できます。内容を確認後、「データ保存」から「Supabaseへ公開」を押すと来場者へ反映されます。</p></div>
     <div class="editor-card program-csv-card">
       <h3>Excelでプログラムを一括入力</h3>
       <p class="muted"><strong>Excel形式（.xlsx）が新しい入力様式です。</strong>「プログラム入力」「入力説明」「選択肢設定」の3タブがあります。<strong>ダウンロード時点で「会場・配置図」に登録済みの会場名を選択肢へ自動反映</strong>します。入力タブでは<strong>会場IDではなく場所名</strong>をプルダウンで選べます。セッション①〜④を選ぶと、<strong>その時点で設定されている開始・終了時刻がC・D列へ自動表示</strong>されます。発表学年には「保育所」「実行委員」「吹奏楽部」「音楽部」も選べます。セッション以外の時刻はJ・K列に入力してください。<strong>L列「リアクション区分」で3種類から選択できます（未選択はセッション＝対象、それ以外＝対象外）。</strong>入力後はExcelのまま読み込めます。</p>
@@ -514,12 +523,12 @@
 
   <div class="admin-page" id="admin-data">
     <div class="editor-card basic-card"><h3>Supabaseへ公開する</h3>
-      <p>教室・プログラム・年度の編集内容は、まず<strong>このブラウザの下書き</strong>に保存されます。確認が済んだら<strong>「Supabaseへ公開」</strong>を押してください。公開した内容は来場者の画面に共有されます。</p>
+      <p>会場・プログラム・年度の編集内容は<strong>共有下書き</strong>に保存されます。「同期済み」を確認したら、<strong>「Supabaseへ公開」</strong>で来場者の画面に反映できます。</p>
       <p class="cloud-state" id="firebasePublishSummary" role="status">公開データを確認中…</p>
       <div class="row-actions"><button type="button" id="firebasePublish" class="btn primary" disabled>Supabaseへ公開</button><button type="button" id="firebaseLoadDraft" class="btn light" disabled>公開データを編集用に読み込む</button></div>
       <p id="firebasePublishMessage" class="caption" role="status">管理者ログイン後に公開できます。</p>
       <p class="caption"><strong>安全機能：</strong>2回目以降の公開では、現在のSupabase公開データを<strong>公開直前に自動で復元ポイントへ保存</strong>します。復元ポイントの保存に失敗した場合は、新しい内容を公開しません。</p>
-      <p class="caption"><strong>注意：</strong>一般公開するのは年度・開催日・スローガン・会場・プログラム（児童生徒名を除く）・リアクション受付期限です。児童生徒名は別の保護領域へ保存し、大豊学園関係者用パスコードで確認します。管理者の<strong>テスト日時</strong>と、来場者の<strong>スタンプ取得状況</strong>は公開・上書きしません。「公開データを編集用に読み込む」は現在の下書きを置き換えるため、先にJSONバックアップを保存してください。</p>
+      <p class="caption"><strong>注意：</strong>一般公開するのは年度・開催日・スローガン・会場・プログラム（児童生徒名を除く）・リアクション受付期限です。児童生徒名は別の保護領域へ保存し、大豊学園関係者用パスコードで確認します。管理者の<strong>テスト日時</strong>と、来場者の<strong>スタンプ取得状況</strong>は公開・上書きしません。「公開データを編集用に読み込む」は共有下書きを置き換えます。手元に残しておきたい変更は先にJSONを書き出してください。</p>
     </div>
     <div class="editor-card basic-card"><h3>公開データの復元</h3>
       <p>「Supabaseへ公開」する直前の公開状態を自動保存しています。誤って会場やプログラムを消した状態で公開した場合は、ここから<strong>直前の公開状態へ戻せます</strong>。</p>
@@ -529,7 +538,7 @@
       <p class="caption"><strong>二重保護：</strong>復元を実行する直前にも、現在の公開状態を新しい復元ポイントとして自動保存します。そのため、復元後にもう一度戻すこともできます。</p>
     </div>
     <div class="editor-card basic-card"><h3>JSONバックアップ（引き継ぎ用）</h3>
-      <p>ブラウザや端末を変更する前に、設定JSONを保存してください。古いバージョンで登録した教室データも引き継げます。</p>
+      <p>控えを残すときは、下書きをJSONで書き出してください。過去の設定JSONも読み込めます。</p>
       <button id="exportJson" class="btn primary">下書きの設定JSONを書き出す</button>
       <label>設定JSONを読み込む<input type="file" id="importJson" accept=".json,application/json"></label>
       <p id="importJsonStatus" class="cloud-state" role="status">まだJSONを読み込んでいません。</p>

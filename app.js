@@ -64,7 +64,14 @@ const DEFAULT_DATA = {
 const clone = (v)=>JSON.parse(JSON.stringify(v));
 const esc = (v)=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const byId=(id)=>document.getElementById(id);
-function getSaved(){try {const a=localStorage.getItem(STORAGE_KEY);return a?validData(JSON.parse(a)):clone(DEFAULT_DATA)}catch(e){console.warn(e);return clone(DEFAULT_DATA)}}
+const DRAFT_META_KEY='_sharedDraft';
+const DRAFT_RECOVERY_KEY='ofes-draft-before-sync-v157';
+function getSaved(){
+ try{
+  const { [DRAFT_META_KEY]:metadata, ...saved }=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');
+  return { data:Array.isArray(saved.zones)?validData(saved):clone(DEFAULT_DATA), metadata:metadata||{} };
+ }catch(error){console.warn(error);return {data:clone(DEFAULT_DATA),metadata:{}};}
+}
 function reactionProgramKey(p){
  return `${String(p.grade||'').trim()}|${String(p.group||'').trim()}|${String(p.title||'').trim()}`.toLocaleLowerCase('ja');
 }
@@ -173,28 +180,15 @@ function bound(v,a,b){const n=Number(v);return Number.isFinite(n)?Math.max(a,Mat
 // バージョン更新時、従来のlocalStorageデータは編集用としてそのまま引き継ぐ。
 let hasLegacyDraft=false;
 try {hasLegacyDraft=!!localStorage.getItem(STORAGE_KEY);} catch(e) {console.warn('localStorage unavailable',e);}
-let draftState=getSaved();
+const savedDraft=getSaved();
+let draftState=savedDraft.data;
 let publishedState=null;
 let editorActive=false;
 // サンプルデータの新規生成は廃止。既に登録済みの下書きは勝手に消さない。
 let demoDraftPreview=false;
-let state=draftState;
+let state=clone(DEFAULT_DATA);
 let cloudAvailable=false;
 const schemaVersion=10;
-function projectPublished(src){
- const safe=validData(src);
- // テスト日時はブラウザ専用。公開データには送らず、全来場者で実時刻を使う。
- const publicPrograms=safe.programs.map(({presenters,...p})=>p);
- return {schemaVersion,campusCanvasVersion:safe.campusCanvasVersion,year:safe.year,eventDate:safe.eventDate,slogan:safe.slogan,sessions:clone(safe.sessions),
-   zones:clone(safe.zones),safetyItems:clone(safe.safetyItems),showSafetyInfo:safe.showSafetyInfo,nextSafetyId:safe.nextSafetyId,nextIds:clone(safe.nextIds),programs:publicPrograms,reactionDeadline:safe.reactionDeadline,
-   noticeTitle:safe.noticeTitle,noticeMessage:safe.noticeMessage,noticeIssuer:safe.noticeIssuer,stampCompleteImage:safe.stampCompleteImage,stampHints:clone(safe.stampHints),surveys:clone(safe.surveys.filter(x=>x.target==='public'||x.target==='both'))};
-}
-function projectInternal(src){
- const safe=validData(src);
- const presenters={};
- for(const p of safe.programs){const names=String(p.presenters||'').trim();if(names)presenters[p.id]=names;}
- return {year:safe.year,passcode:String(safe.internalPasscode||''),payload:{presenters,surveys:clone(safe.surveys.filter(x=>x.target==='internal'))}};
-}
 function projectArchive(src){
  const safe=validData(src);
  const archived=clone(safe);
@@ -213,9 +207,10 @@ function currentPresenterNames(p){
 }
 function presentersHtml(p,compact=false){const names=currentPresenterNames(p);return names?`<div class="program-presenters ${compact?'compact':''}"><span>児童生徒</span>${esc(names)}</div>`:'';}
 function applyAdminInternalToDraft(){
- const map=adminInternalPayload?.presenters||{};
+ if(adminInternalPayload?.year!==String(draftState.year))return;
+ const map=adminInternalPayload.payload?.presenters||{};
  if(map&&typeof map==='object'){for(const p of draftState.programs||[]){if(map[p.id]&&!p.presenters)p.presenters=String(map[p.id]);}}
- const privateSurveys=Array.isArray(adminInternalPayload?.surveys)?adminInternalPayload.surveys:[];
+ const privateSurveys=adminInternalPayload.payload?.surveys||[];
  if(privateSurveys.length){const merged=new Map((draftState.surveys||[]).map(x=>[x.id,x]));for(const item of privateSurveys)merged.set(item.id,{...item,target:'internal'});draftState.surveys=[...merged.values()];}
 }
 function acceptPublished(doc){
@@ -223,33 +218,136 @@ function acceptPublished(doc){
   publishedState=doc?validData({...doc,test:{enabled:false,date:doc.eventDate||DEFAULT_DATA.eventDate,time:'09:25'}}):null;
   cloudAvailable=!!publishedState;
   if(editorActive)renderPublishedVenueNote();
-  if(!editorActive && !demoDraftPreview){state=publishedState||draftState;renderPublic();}
+  if(!editorActive && !demoDraftPreview){state=visitorState();renderPublic();}
  }catch(e){console.error('公開データの形式が不正です',e);toast('Supabaseの公開データを読み込めませんでした。');}
+}
+function visitorState(){
+ return publishedState || clone(DEFAULT_DATA);
 }
 function switchDraft(){
  editorActive=true;
- // 新規ブラウザの場合は、最初の編集時に公開済みデータから下書きを作る。
- if(!hasLegacyDraft && !localStorage.getItem(STORAGE_KEY) && publishedState){
-  draftState=clone(publishedState);
-  localStorage.setItem(STORAGE_KEY,JSON.stringify(draftState));
+ if(!hasLegacyDraft && !draftSync.meta.revision && publishedState){
+  const test=draftState.test;
+  draftState={...clone(publishedState),test};
  }
- applyAdminInternalToDraft();
+ if(!draftSync.meta.revision)applyAdminInternalToDraft();
  state=draftState;
 }
-function closeDraft(){editorActive=false;state=demoDraftPreview?draftState:(publishedState||draftState);renderPublic();}
+function closeDraft(){
+ editorActive=false;
+ window.dispatchEvent(new CustomEvent('ofes-draft-status'));
+ draftSync.setDirtyForm(false);
+ state=visitorState();
+ renderPublic();
+}
+function saveDraftLocal(metadata=draftSync.meta){
+ localStorage.setItem(STORAGE_KEY,JSON.stringify({...draftState,[DRAFT_META_KEY]:metadata}));
+}
+function backupDraftBeforeSync(){
+ localStorage.setItem(DRAFT_RECOVERY_KEY,JSON.stringify({version:18,data:draftState}));
+}
+function refreshDraftEditors(){
+ editId='';editDraft=null;selectedSafetyId='';drawMode='';adminProgramVenue='';
+ if(editorActive){state=draftState;renderAdmin();renderPublic();}
+}
+const draftSync=new SharedDraftSync({
+ metadata:savedDraft.metadata,
+ loadLocal:()=>{const {test,...payload}=validData(draftState);return {payload:{...payload,schemaVersion},legacy:hasLegacyDraft};},
+ saveLocal:saveDraftLocal,
+ accept:(payload,metadata)=>{
+  const next=validData({...payload,test:draftState.test});
+  localStorage.setItem(STORAGE_KEY,JSON.stringify({...next,[DRAFT_META_KEY]:metadata}));
+  draftState=next;
+  hasLegacyDraft=true;
+  refreshDraftEditors();
+ },
+ backup:backupDraftBeforeSync,
+ show:({message,tone,busy,initialize,refresh,synchronized})=>{
+  const label=byId('draftSyncStatus');
+  if(message!==undefined){label.textContent=message;label.dataset.tone=tone||'';}
+  const start=byId('draftSyncStart');
+  const load=byId('draftSyncRefresh');
+  if(initialize!==undefined)start.hidden=!initialize;
+  if(refresh!==undefined)load.hidden=!refresh;
+  start.disabled=busy;load.disabled=busy;
+  try{byId('draftSyncBackup').hidden=!localStorage.getItem(DRAFT_RECOVERY_KEY);}catch{byId('draftSyncBackup').hidden=true;}
+  window.dispatchEvent(new CustomEvent('ofes-draft-status',{detail:{synchronized}}));
+ },
+});
+window.OFESSharedDraft={
+ canPublish:()=>editorActive&&draftSync.canPublish(),
+ revision:()=>draftSync.meta.revision,
+};
+function renderDraftAccess(){
+ const locked=!(draftSync.account && (draftSync.ready||draftSync.meta.revision));
+ for(const button of $$('#adminNav [data-admin]')){
+  button.disabled=locked && !['firebase','handover'].includes(button.dataset.admin);
+ }
+ if(locked && !['firebase','handover'].includes($('#adminNav .active')?.dataset.admin))openAdminTab('firebase');
+ if(locked && editorActive){
+  state=visitorState();renderPublic();
+ }else if(editorActive){
+  state=draftState;
+ }
+ byId('resetAll').hidden=Boolean(draftSync.meta.revision);
+}
+window.addEventListener('ofes-draft-auth',async e=>{
+ if(e.detail.account===draftSync.account && draftSync.task)return;
+ const mustRender=draftSync.account!==e.detail.account||!draftSync.ready;
+ const connected=draftSync.connect(e.detail.account,e.detail.api,editorActive);
+ renderDraftAccess();
+ await connected;
+ renderDraftAccess();
+ if(mustRender&&editorActive&&draftSync.ready&&!draftSync.dirtyForm){renderAdmin();renderPublic();}
+
+});
+async function refreshSharedDraft(automatic=false){
+ if(!editorActive||!draftSync.account)return;
+ const locked=state!==draftState;
+ await draftSync.refresh({automatic});
+ renderDraftAccess();
+ if(locked&&editorActive&&state===draftState&&!draftSync.dirtyForm){renderAdmin();renderPublic();}
+}
+window.addEventListener('focus',()=>{void refreshSharedDraft(true);});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refreshSharedDraft(true);});
+window.addEventListener('online',()=>{void refreshSharedDraft(true);});
+byId('draftSyncStart').onclick=async()=>{
+ if(draftSync.dirtyForm){alert('入力中の欄を保存してから、共有を開始してください。');return;}
+ if(!confirm(`この端末の下書き（${draftState.year}年度・会場${draftState.zones.length}か所・プログラム${draftState.programs.length}件）を最初の共有下書きにしますか？`))return;
+ await draftSync.flush(true);
+ renderDraftAccess();
+};
+byId('draftSyncRefresh').onclick=async()=>{
+ if(draftSync.dirtyForm){alert('入力中の欄を保存してから、共有下書きを確認してください。');return;}
+ const replace=draftSync.conflict;
+ if(replace&&!confirm('この端末の保存内容をJSONに残し、共有下書きを開きますか？'))return;
+ await draftSync.refresh({replace});
+ renderDraftAccess();
+};
+byId('draftSyncBackup').onclick=()=>{
+ const data=localStorage.getItem(DRAFT_RECOVERY_KEY);
+ if(data)downloadDraftJson(data,'OFES_before_sync.json');
+};
+function downloadDraftJson(data,name){
+ const url=URL.createObjectURL(new Blob([data],{type:'application/json'}));
+ const link=document.createElement('a');link.href=url;link.download=name;link.click();
+ setTimeout(()=>URL.revokeObjectURL(url),2500);
+}
 window.OFESCloud={
-  exportPublished:()=>projectPublished(draftState),
-  exportInternal:()=>projectInternal(draftState),
+  draftSummary:()=>({year:draftState.year,zones:draftState.zones.length,
+   programs:draftState.programs.length,reactionDeadline:draftState.reactionDeadline}),
   exportArchive:()=>projectArchive(draftState),
   publishedSummary:()=>({exists:cloudAvailable,year:publishedState?.year,zones:publishedState?.zones.length||0,programs:publishedState?.programs.length||0}),
   importPublishedAsDraft:()=>{
    if(!publishedState)throw Error('Supabaseにはまだ公開データがありません。');
-   draftState=clone(publishedState);applyAdminInternalToDraft();state=draftState;persist();editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
+   const test=draftState.test,passcode=draftState.year===publishedState.year?draftState.internalPasscode:'';
+   backupDraftBeforeSync();
+   draftState={...clone(publishedState),test,internalPasscode:passcode};applyAdminInternalToDraft();state=draftState;if(!persist())throw Error('下書きの端末保存に失敗しました。');editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
    renderAdmin();renderPublic();toast('Supabaseの公開データを編集用に読み込みました');
   }
 };
 window.addEventListener('ofes-cloud-published',e=>acceptPublished(e.detail?.data??null));
-window.addEventListener('ofes-internal-admin',e=>{adminInternalPayload=e.detail?.payload||null;if(editorActive){applyAdminInternalToDraft();state=draftState;persist();renderAdminPrograms();renderSurveyAdmin();}});
+window.addEventListener('ofes-internal-admin',e=>{adminInternalPayload=e.detail||null;if(editorActive&&!draftSync.meta.revision){applyAdminInternalToDraft();if(state===draftState){renderAdminPrograms();renderSurveyAdmin();}}});
 window.addEventListener('ofes-internal-access',e=>{internalPresenterMap=e.detail?.payload?.presenters||{};internalSurveyList=Array.isArray(e.detail?.payload?.surveys)?e.detail.payload.surveys:[];audienceMode='internal';sessionStorage.setItem(ACCESS_MODE_KEY,'internal');hideEntryGate();renderPublic();renderTv();});
 
 let visitorBuilding='campus',session='current',visitorSelected='';
@@ -262,7 +360,18 @@ function syncSessionProgramTimes(target=state){
  if(!target.sessions)target.sessions=clone(DEFAULT_SESSIONS);
  for(const p of target.programs||[]){const sd=target.sessions[p.session];if(sd){p.start=sd.start;p.end=sd.end;}}
 }
-function persist(){try{syncSessionProgramTimes(state);syncReactionGroups(state);draftState=state;localStorage.setItem(STORAGE_KEY,JSON.stringify(state));return true}catch(e){alert('ブラウザに保存できませんでした。容量・設定をご確認ください。');return false}}
+function persist({deviceOnly=false}={}){
+ try{
+  syncSessionProgramTimes(state);syncReactionGroups(state);draftState=state;
+  if(deviceOnly)saveDraftLocal();
+  else{
+   draftSync.setDirtyForm(false);
+   draftSync.record();
+   hasLegacyDraft=true;
+  }
+  return true;
+ }catch(error){console.warn(error);alert('ブラウザに保存できませんでした。容量・設定をご確認ください。');return false;}
+}
 function toast(msg){byId('saveToast').textContent=msg;}
 function getZone(id){return state.zones.find(z=>z.id===id)}
 function getSafety(id){return (state.safetyItems||[]).find(it=>it.id===id)}
@@ -980,15 +1089,28 @@ function renderPublic(){renderHeader();renderProgram();renderSurveys();renderVis
 // 管理画面へのアクセスはブラウザ試作用の簡易パスワード。外部の書込権限には用いない。
 byId('openAdmin').onclick=()=>{reactionPreviewMode=false;reactionPreviewProgram=null;byId('loginModal').hidden=false;byId('adminPassword').value='';byId('loginError').textContent='';byId('adminPassword').focus()};
 byId('cancelLogin').onclick=()=>byId('loginModal').hidden=true;
-byId('loginForm').onsubmit=e=>{e.preventDefault();if(byId('adminPassword').value!==DEMO_ADMIN_PASSWORD){byId('loginError').textContent='パスワードが違います。';return}
- byId('loginModal').hidden=true;switchDraft();byId('adminPanel').hidden=false;renderPublic();renderAdmin();};
-byId('closeAdmin').onclick=()=>{byId('adminPanel').hidden=true;drawMode='';closeDraft();if(!audienceMode)showEntryGate();};
+byId('loginForm').onsubmit=async e=>{e.preventDefault();if(byId('adminPassword').value!==DEMO_ADMIN_PASSWORD){byId('loginError').textContent='パスワードが違います。';return}
+ byId('loginModal').hidden=true;switchDraft();byId('adminPanel').hidden=false;
+ renderDraftAccess();
+ if(!draftSync.account)draftSync.status('Supabase接続で管理者ログインすると、端末間で下書きを同期できます。','warning');
+ await refreshSharedDraft();
+ if(editorActive&&draftSync.account&&(draftSync.ready||draftSync.meta.revision)&&!draftSync.dirtyForm){renderPublic();renderAdmin();}
+};
+byId('closeAdmin').onclick=()=>{if(draftSync.dirtyForm&&!confirm('入力途中の欄があります。管理画面を閉じますか？'))return;byId('adminPanel').hidden=true;drawMode='';closeDraft();if(!audienceMode)showEntryGate();};
 function openAdminTab(t){
  $$('#adminNav button').forEach(x=>x.classList.toggle('active',x.dataset.admin===t));
  $$('.admin-page').forEach(x=>x.classList.toggle('active',x.id===`admin-${t}`));
  if(t==='preflight')renderPreflight();if(t==='venues')renderEditor();if(t==='program')renderAdminPrograms();if(t==='basic')renderBasic();if(t==='surveys')renderSurveyAdmin();if(t==='notice')renderNotice();if(t==='stampqr')renderStampQrAdmin();if(t==='years')renderYearArchives();
 }
-$$('#adminNav button').forEach(b=>b.onclick=()=>openAdminTab(b.dataset.admin));
+$$('#adminNav button').forEach(b=>b.onclick=()=>{
+ if(b.classList.contains('active'))return;
+ if(draftSync.dirtyForm&&!confirm('入力途中の欄があります。画面を切り替えますか？'))return;
+ draftSync.setDirtyForm(false);openAdminTab(b.dataset.admin);
+});
+byId('adminPanel').addEventListener('input',e=>{
+ if(e.target.closest('#admin-venues,#admin-basic,#admin-program,#admin-notice,#admin-stampqr,#admin-surveys')
+   && !e.target.matches('#testEnabled,#testDate,#testTime,#testSlider,[type=file],[type=checkbox]'))draftSync.setDirtyForm(true);
+});
 function renderPreflight(){
  const box=byId('preflightGrid'),score=byId('preflightScore'),badge=byId('preflightBadge');if(!box)return;
  const dateOk=/^\d{4}-\d{2}-\d{2}$/.test(state.eventDate||'')&&String(state.year||'').trim()&&String(state.slogan||'').trim();
@@ -1578,7 +1700,7 @@ byId('saveBasic').onclick=()=>{const year=byId('settingYear').value.trim(),date=
  const internalPass=byId('internalPasscodeSetting').value.trim();if(internalPass && !/^[0-9]{8,24}$/.test(internalPass))return alert('大豊学園関係者用パスコードは数字8〜24桁で設定してください。');
  state.year=year;state.eventDate=date;state.slogan=byId('settingSlogan').value.trim();state.internalPasscode=internalPass;state.reactionDeadline=oldDate!==date&&deadline.startsWith(oldDate+'T')?date+deadline.slice(10):deadline;byId('reactionDeadline').value=state.reactionDeadline;persist();renderPublic();toast('年度設定を保存しました');};
 function updateTest(){state.test.enabled=byId('testEnabled').checked;state.test.date=byId('testDate').value||state.eventDate;state.test.time=byId('testTime').value||'09:25';
- byId('testTimeText').textContent=state.test.time;byId('testSlider').value=timeNum(state.test.time);persist();renderPublic();}
+ byId('testTimeText').textContent=state.test.time;byId('testSlider').value=timeNum(state.test.time);persist({deviceOnly:true});renderPublic();}
 byId('testEnabled').onchange=updateTest;byId('testDate').onchange=updateTest;byId('testTime').oninput=updateTest;
 byId('testSlider').oninput=e=>{const n=Number(e.target.value);byId('testTime').value=`${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;byId('testEnabled').checked=true;updateTest();};
 $$('[data-quick]').forEach(b=>b.onclick=()=>{byId('testTime').value=b.dataset.quick;byId('testDate').value=state.eventDate;byId('testEnabled').checked=true;updateTest();});
@@ -1787,18 +1909,19 @@ byId('printNotice').onclick=()=>{
  w.document.open();w.document.write(html);w.document.close();
 };
 
-byId('exportJson').onclick=()=>{const blob=new Blob([JSON.stringify({version:18,data:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`OFES_${state.year}_backup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);};
+byId('exportJson').onclick=()=>downloadDraftJson(JSON.stringify({version:18,data:draftState},null,2),`OFES_${draftState.year}_backup.json`);
 byId('importJson').onchange=async e=>{
  const f=e.target.files?.[0];if(!f)return;
  const status=byId('importJsonStatus');
  try{
   const parsed=JSON.parse(await f.text());
   const next=validData(parsed.data||parsed);
-  if(!confirm('現在の設定を読み込んだデータで置き換えますか？')){
+  if(!confirm(draftSync.meta.revision?'共有下書き全体をこのJSONで置き換えます。ほかの管理端末にも反映されます。続けますか？':'この端末の設定をJSONの内容で置き換えますか？')){
    if(status){status.className='cloud-state warning';status.textContent='JSONの読み込みをキャンセルしました。現在の下書きは変更していません。';}
    return;
   }
   // 読み込みデータを「編集用の下書き」として明示的に採用する。
+  if(draftSync.meta.revision)backupDraftBeforeSync();
   draftState=clone(next);
   state=draftState;
   editorActive=true;
@@ -1820,7 +1943,7 @@ byId('importJson').onchange=async e=>{
   e.target.value='';
  }
 };
-byId('resetAll').onclick=()=>{if(!confirm('このブラウザに保存した会場・プログラムなどの下書きデータをすべて初期化しますか？'))return;state=clone(DEFAULT_DATA);draftState=state;persist();adminMap='campus';editId='';editDraft=null;adminProgramVenue='';renderAdmin();renderPublic();toast('初期化しました')};
+byId('resetAll').onclick=()=>{if(draftSync.meta.revision){alert('共有開始後は「共有下書きを確認」から最新版を開けます。');return;}if(!confirm('このブラウザに保存した会場・プログラムなどの下書きデータをすべて初期化しますか？'))return;state=clone(DEFAULT_DATA);draftState=state;persist({deviceOnly:true});adminMap='campus';editId='';editDraft=null;adminProgramVenue='';renderAdmin();renderPublic();toast('初期化しました')};
 audienceMode=sessionStorage.getItem(ACCESS_MODE_KEY)==='public'?'public':'';renderPublic();readStampFromUrl();if(!audienceMode)showEntryGate();else hideEntryGate();
 // 外部SDKが読み込めない場合も、接続タブで理由が分かるようにする。
 setTimeout(()=>{

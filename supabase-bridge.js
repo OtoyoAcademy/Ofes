@@ -153,8 +153,8 @@ function configured() {
     !!supabaseConfig.publishableKey && !String(supabaseConfig.publishableKey).includes('YOUR_PUBLISHABLE_KEY');
 }
 function setUiState() {
-  if (publishButton) publishButton.disabled = !isLoggedIn || isBusy || !cloudLoaded || cloudError;
-  if (loadButton) loadButton.disabled = !publishedData || isBusy;
+  if (publishButton) publishButton.disabled = !isLoggedIn || isBusy || !cloudLoaded || cloudError || !window.OFESSharedDraft?.canPublish();
+  if (loadButton) loadButton.disabled = !publishedData || isBusy || !window.OFESSharedDraft?.canPublish();
   if (restorePublishedButton) restorePublishedButton.disabled = !isLoggedIn || isBusy || !latestPublicationBackup;
   if (cloudError) {
     status(cloudStatus,'接続エラー','error');
@@ -173,6 +173,26 @@ function setUiState() {
   }
 }
 function isAdmin(){ return !!currentIsAdmin && !!currentUser; }
+async function draftRpc(name, args){
+ if(!isAdmin())throw Error('Supabase接続で管理者としてログインしてください。');
+ const {data,error}=await supabase.rpc(name,args);
+ if(!error)return data;
+ if(error.code==='PGRST202'||error.code==='42883'){
+  throw Error('共有下書きの設定が見つかりません。指定のVer.1.57用SQLを実行後、共有下書きを確認してください。');
+ }
+ if(error.message?.includes('OFES_DRAFT_CONFLICT')){
+  throw Error('OFES_DRAFT_CONFLICT：別端末で下書きが更新されました。共有下書きを確認してください。');
+ }
+ throw Error(`共有下書きを同期できませんでした。この端末の保存内容を保持しています。共有下書きを確認して再試行してください。（${errorText(error)}）`);
+}
+const sharedDraftApi={
+ read:()=>draftRpc('ofes_read_shared_draft'),
+ save:(payload,revision,writeId)=>draftRpc('ofes_save_shared_draft',{
+  p_payload:payload,p_expected_revision:revision,p_write_id:writeId,
+ }),
+};
+window.addEventListener('ofes-draft-status',setUiState);
+let authCheck=0;
 // Ver.1.49: お知らせ文面だけを最新の公開データから取得する管理者向けAPI。
 // キャッシュ済みのローカル下書きや公開スナップショットは使わない。
 window.OFESCloudNotice={
@@ -236,8 +256,13 @@ async function checkAdmin(user){
   return data === true;
 }
 async function refreshSessionUi(userOverride=undefined){
-  if(userOverride!==undefined){currentUser=userOverride;}else{const { data:{ session } } = await supabase.auth.getSession();currentUser=session?.user||null;}
-  try{ currentIsAdmin = await checkAdmin(currentUser); }catch(error){ console.warn(error); currentIsAdmin=false; }
+  const check=++authCheck;
+  const user=userOverride===undefined?(await supabase.auth.getSession()).data.session?.user||null:userOverride;
+  let admin=false;
+  try{admin=await checkAdmin(user);}catch(error){console.warn(error);}
+  if(check!==authCheck)return;
+  currentUser=user;
+  currentIsAdmin=admin;
   isLoggedIn = currentIsAdmin;
   const signed = !!currentUser && !currentUser.is_anonymous;
   if(signInButton){signInButton.hidden=currentIsAdmin;signInButton.disabled=false;}
@@ -270,9 +295,14 @@ async function refreshSessionUi(userOverride=undefined){
     status(publishMessage,'管理者ログイン後に公開できます。');
   }
   status(readResult,currentIsAdmin?'Supabaseの管理者権限を確認できます。':'管理者ログイン後に確認できます。');
+  if(isAdmin() && publishedData?.year){
+   try{await fetchAdminInternal(publishedData.year);}catch(error){console.warn('internal admin load',error);}
+  }
+  if(check===authCheck)window.dispatchEvent(new CustomEvent('ofes-draft-auth',{
+   detail:{account:isAdmin()?currentUser.id:'',api:sharedDraftApi},
+  }));
   await refreshRestorePointInfo();
   await refreshPublicationBackupInfo();
-  if(currentIsAdmin && publishedData?.year){try{await fetchAdminInternal(publishedData.year);}catch(error){console.warn('internal admin load',error);}}
 }
 async function fetchPublished(){
   const { data, error } = await supabase.from('ofes_site_state')
@@ -436,11 +466,6 @@ async function fetchAdminInternal(year){
   window.dispatchEvent(new CustomEvent('ofes-internal-admin',{detail:{year:String(year),payload}}));
   return payload;
 }
-async function saveInternalFromDraft(){
-  const internal=window.OFESCloud?.exportInternal?.();if(!internal)return;
-  const { error }=await supabase.rpc('admin_save_ofes_internal',{p_year:String(internal.year||''),p_passcode:String(internal.passcode||''),p_payload:internal.payload||{presenters:{}}});
-  if(error)throw error;
-}
 function installExtendedApis(){
   window.OFESInternal={
     verify:async(year,passcode)=>{const {data,error}=await supabase.rpc('verify_ofes_internal_access',{p_year:String(year||''),p_passcode:String(passcode||'')});if(error)throw error;return data||null;}
@@ -532,21 +557,23 @@ signOutButton?.addEventListener('click',async()=>{signOutButton.disabled=true;tr
 el('firebaseCopyUid')?.addEventListener('click',async()=>{const value=el('firebaseUserUid')?.value;if(!value)return;try{await navigator.clipboard.writeText(value);status(authMessage,'UIDをコピーしました。','ok');}catch{el('firebaseUserUid').focus();el('firebaseUserUid').select();status(authMessage,'UIDを選択しました。Ctrl+Cなどでコピーしてください。');}});
 readButton?.addEventListener('click',async()=>{readButton.disabled=true;status(readResult,'Supabaseの管理者権限を確認中…','loading');try{const { data, error }=await supabase.rpc('is_ofes_admin');if(error)throw error;status(readResult,data?'読み取り成功：管理者権限が確認できました。':'読み取り成功：ただし管理者として登録されていません。',data?'ok':'error');}catch(error){status(readResult,`確認失敗：${errorText(error)}`,'error');}finally{readButton.disabled=!isAdmin();}});
 publishButton?.addEventListener('click',async()=>{
-  if(!isAdmin()||isBusy||!cloudLoaded||cloudError)return;const payload=window.OFESCloud?.exportPublished?.();if(!payload)return status(publishMessage,'下書きが取得できません。画面を再読み込みしてください。','error');
+  if(!isAdmin()||isBusy||!cloudLoaded||cloudError||!window.OFESSharedDraft?.canPublish())return;
+  const revision=window.OFESSharedDraft.revision();
+  const draft=window.OFESCloud?.draftSummary?.();if(!draft)return status(publishMessage,'下書きが取得できません。画面を再読み込みしてください。','error');
   const before=publishedData?`現在の公開データ（会場${publishedData.zones?.length||0}か所）を上書きします。`:'初めての公開です。';
-  const warning=publishedData?.zones?.length>payload.zones.length?'\n【注意】現在の公開会場数より下書きの会場数が少なくなっています。ほかの端末で教室登録を進めている場合は、公開しないでください。\n':'';
-  if(!confirm(`${before}\n${warning}\n年度：${payload.year}\n会場：${payload.zones.length}か所\nプログラム：${payload.programs.length}件\n受付終了：${payload.reactionDeadline}（日本時間）\n\nこの内容を来場者向けに公開してよろしいですか？`))return;
+  const warning=publishedData?.zones?.length>draft.zones?'\n【注意】現在の公開会場数より下書きの会場数が少なくなっています。ほかの端末で教室登録を進めている場合は、公開しないでください。\n':'';
+  if(!confirm(`${before}\n${warning}\n年度：${draft.year}\n会場：${draft.zones}か所\nプログラム：${draft.programs}件\n受付終了：${draft.reactionDeadline}（日本時間）\n\nこの内容を来場者向けに公開してよろしいですか？`))return;
   isBusy=true;setUiState();let backupPoint=null;
   try{
     if(publishedData){status(publishMessage,'現在の公開状態を復元ポイントへ自動保存しています…','loading');backupPoint=await createPublicationBackup('pre-publish');}
-    status(publishMessage,'大豊学園関係者用データを安全に保存しています…','loading');
-    await saveInternalFromDraft();
-    status(publishMessage,'Supabaseへ公開しています。画面を閉じずにお待ちください…','loading');
-    const safePayload=await retainLatestStampResetToken(payload);
-    const row={id:'site',payload:safePayload,event_date:payload.eventDate,reaction_deadline_at:jstDeadlineIso(payload.reactionDeadline),reaction_revision:Number(publishedData?.reactionRevision||0),updated_at:new Date().toISOString(),updated_by:currentUser.id};
-    const { error }=await supabase.from('ofes_site_state').upsert(row,{onConflict:'id'});if(error)throw error;
-    await fetchPublished();await fetchAdminInternal(payload.year);status(publishMessage,backupPoint?`Supabaseへの公開が完了しました。公開前の復元ポイント ${backupPoint.backupId} も保存しました。`:'Supabaseへの初回公開が完了しました。別の端末でも同じ内容を閲覧できます。','ok');
-  }catch(error){status(publishMessage,`公開に失敗：${errorText(error)}${publishedData?'（公開前バックアップに失敗した場合、新しい内容は公開していません）':''}`,'error');}
+    status(publishMessage,'共有下書きの内容をSupabaseへ公開しています…','loading');
+    await draftRpc('ofes_publish_shared_draft',{p_expected_revision:revision});
+    await fetchPublished();await fetchAdminInternal(draft.year);status(publishMessage,backupPoint?`Supabaseへの公開が完了しました。公開前の復元ポイント ${backupPoint.backupId} も保存しました。`:'Supabaseへの初回公開が完了しました。別の端末でも同じ内容を閲覧できます。','ok');
+  }catch(error){
+    if(error.message?.includes('OFES_DRAFT_CONFLICT')){
+      status(publishMessage,'別端末で下書きが更新されたため公開を中止しました。共有下書きを確認してください。','error');
+    }else status(publishMessage,`公開処理を確認してください：${errorText(error)}`,'error');
+  }
   finally{isBusy=false;setUiState();await refreshPublicationBackupInfo();}
 });
 restorePublishedButton?.addEventListener('click',async()=>{
@@ -562,7 +589,7 @@ restorePublishedButton?.addEventListener('click',async()=>{
   }catch(error){status(publicationBackupMessage,`復元に失敗：${errorText(error)}`,'error');}
   finally{isBusy=false;setUiState();await refreshPublicationBackupInfo();}
 });
-loadButton?.addEventListener('click',()=>{if(!publishedData||isBusy)return;if(!confirm('現在のブラウザ内の下書きが、Supabaseの公開データで上書きされます。\n\n必要な場合は先に「下書きの設定JSONを書き出す」でバックアップしてください。\n\n読み込みますか？'))return;try{window.OFESCloud?.importPublishedAsDraft?.();status(publishMessage,'Supabaseの公開データを編集用の下書きに読み込みました。','ok');}catch(e){status(publishMessage,`読み込み失敗：${e.message}`,'error');}});
+loadButton?.addEventListener('click',async()=>{if(!publishedData||isBusy||!window.OFESSharedDraft?.canPublish())return;if(!confirm('共有下書きをSupabaseの公開データで置き換えます。管理者が使う他の端末にも反映されます。\n\n必要な場合は先に「下書きの設定JSONを書き出す」でバックアップしてください。\n\n読み込みますか？'))return;try{await fetchAdminInternal(publishedData.year);if(!window.OFESSharedDraft?.canPublish())return;window.OFESCloud?.importPublishedAsDraft?.();status(publishMessage,'公開データを下書きに読み込みました。管理画面上部で同期結果を確認してください。','ok');}catch(e){status(publishMessage,`読み込み失敗：${e.message}`,'error');}});
 
 // -------- Init --------
 try{
