@@ -222,6 +222,7 @@ function acceptPublished(doc){
  try {
   publishedState=doc?validData({...doc,test:{enabled:false,date:doc.eventDate||DEFAULT_DATA.eventDate,time:'09:25'}}):null;
   cloudAvailable=!!publishedState;
+  if(editorActive)renderPublishedVenueNote();
   if(!editorActive && !demoDraftPreview){state=publishedState||draftState;renderPublic();}
  }catch(e){console.error('公開データの形式が不正です',e);toast('Supabaseの公開データを読み込めませんでした。');}
 }
@@ -308,9 +309,15 @@ window.addEventListener('storage',(event)=>{
  }catch(error){console.warn('別タブのテスト日時を反映できませんでした',error);}
 });
 function activePrograms(){const t=viewTime();return state.programs.filter(p=>{const pt=programTimes(p);return t.date===state.eventDate && timeNum(pt.start)<=t.minute && t.minute<timeNum(pt.end)})}
+function festivalHasEnded(now=viewTime()){
+ if(now.date!==state.eventDate)return now.date>state.eventDate;
+ const lastEnd=state.programs.reduce((latest,p)=>Math.max(latest,timeNum(programTimes(p).end)||0),0);
+ return lastEnd>0&&now.minute>=lastEnd;
+}
+function mapShowsAllPrograms(){return session==='all'||(session==='current'&&festivalHasEnded());}
 function scheduledPrograms(){
+ if(mapShowsAllPrograms())return state.programs;
  if(session==='current')return activePrograms();
- if(session==='all')return state.programs;
  return state.programs.filter(p=>p.session===session);
 }
 function orderedPrograms(){return [...state.programs].sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||String(a.zoneId).localeCompare(String(b.zoneId))||String(a.id).localeCompare(String(b.id)))}
@@ -325,7 +332,9 @@ function renderHeader(){
  const v=viewTime();
  const end=new Date(state.eventDate+'T00:00:00'), start=new Date(v.date+'T00:00:00');
  const dif=Math.round((end.getTime()-start.getTime())/86400000);
- byId('countdown').textContent=dif>0?`開催まであと ${dif} 日`:dif===0?'いよいよ本日！':'今年のおおフェスは終了しました';
+ const ended=festivalHasEnded(v);
+ byId('countdown').textContent=ended?'今年のおおフェスは終了しました':dif>0?`開催まであと ${dif} 日`:'いよいよ本日！';
+ byId('entryClosing').hidden=!ended;
  byId('previewTag').hidden=!v.demo;byId('previewTag').textContent=`TEST ${v.date} ${v.time}`;
 }
 function setTab(tab,opts={}){if(tab!=='stamp'&&stampScannerActive)closeStampScanner();$$('.nav[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$$('.tab-view').forEach(v=>v.classList.toggle('active',v.id===`tab-${tab}`));if(tab==='venues')renderVisitorMap();if(tab==='stamp')window.OFESStampControl?.refresh?.().catch(error=>console.warn('スタンプ同期確認',error));if(opts.scrollTop!==false)window.scrollTo({top:0,behavior:'smooth'});}
@@ -367,7 +376,9 @@ function renderProgram(){
  const filteredOrdered=orderedPrograms();
  const v=viewTime(),active=activePrograms();
  let text='';
- if(v.date!==state.eventDate){
+ if(festivalHasEnded(v)){
+  text='<strong>今年のおおフェスは終了しました。</strong> 当日のプログラムをご覧いただけます。';
+ }else if(v.date!==state.eventDate){
   text=`開催日：<strong>${esc(state.eventDate.replaceAll('-','/'))}</strong>`;
  }else if(active.length){
   text=`<strong>${active.every(isScheduleNotice)?'移動・準備中':'ただいま開催中'}</strong><br>${active.map(p=>esc(`${p.grade?`${p.grade} `:''}${p.group?`${p.group} `:''}${p.title}`)).join('・')}`;
@@ -490,11 +501,18 @@ function floorLabel(m){return m.floor?`${m.floor}階`:'学校全体図'}
 function floorDetailHtml(m){
  const z=getZone(visitorSelected);
  if(!z||z.mapId!==m.id)return '';
+ const preview=reactionPreviewMode&&(reactionPreviewProgram?.zoneId===z.id||state.programs.some(p=>p.zoneId===z.id));
+ const overview=m.id==='campus'&&!preview;
+ const ended=festivalHasEnded();
+ const note=z.note.trim();
+ const heading=`<h4>${esc(z.name)}${overview&&ended?' <span class="program-status status-ended">終了しました</span>':''}</h4>`;
+ const description=note?`<p class="venue-note">${esc(note)}</p>`:'';
+ if(overview)return heading+description;
  const ps=scheduledPrograms().filter(p=>p.zoneId===z.id);
  if(reactionPreviewMode&&reactionPreviewProgram?.zoneId===z.id&&!ps.some(p=>p.id===reactionPreviewProgram.id))ps.push(reactionPreviewProgram);
- if(!ps.length)return `<h4>${esc(z.name)}</h4>${z.note?`<p>${esc(z.note)}</p>`:''}`;
+ if(!ps.length)return heading+description;
  ps.sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||timeNum(programTimes(a).end)-timeNum(programTimes(b).end)||String(a.id).localeCompare(String(b.id)));
- return `<h4>${esc(z.name)}</h4>${z.note?`<p>${esc(z.note)}</p>`:''}
+ return `${heading}${description}
  <p class="muted">${esc(m.name)}</p>
  <div class="venue-program-list">${ps.map(p=>{const pt=programTimes(p),st=programStatus(p);return `<article class="venue-program-item status-border-${st.key}"><div class="venue-program-meta">${statusBadgeHtml(p)}<strong>${esc(sessionLabel(p.session))}</strong><span>${esc(pt.start)}〜${esc(pt.end)}</span></div><div class="venue-program-title">${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</div>${presentersHtml(p)}${isScheduleNotice(p)?'':reactionsHtml(p)}</article>`}).join('')}</div>`;
 }
@@ -580,26 +598,33 @@ function renderVisitorMap(){
  const hasVenues=state.zones.some(z=>maps.some(m=>m.id===z.mapId));
  // 会場マーカーは常に表示し、選択した時間帯に発表がある会場を強調する。
  if(visitorSelected&&!state.zones.some(z=>z.id===visitorSelected))visitorSelected='';
+ const overview=visitorBuilding==='campus'&&!reactionPreviewMode;
+ const ended=festivalHasEnded();
  const period=sessionDef(session);
- byId('mapSummary').textContent=period
-  ? `${period.label}（${period.start}〜${period.end}）`
-  : session==='all'?'全時間帯の発表を表示':`現在：${viewTime().time}`;
- byId('visitorMapLegend').hidden=!hasVenues;
- byId('visitorMapLegendLabel').textContent=session==='all'?'発表会場':'選択中の時間帯で使用する会場';
+ const showingAll=mapShowsAllPrograms();
+ byId('mapSummary').textContent=overview
+  ? ended?'終了しました。当日の会場案内をご覧いただけます。':'前期棟・後期棟・体育館などをタップすると案内を表示します。'
+  : period?`${period.label}（${period.start}〜${period.end}）`
+  : showingAll?(ended?'終了しました。全時間帯の発表を表示しています。':'全時間帯の発表を表示')
+  : `現在：${viewTime().time}`;
+ byId('visitorMapLegend').hidden=!hasVenues||overview;
+ byId('visitorMapLegendLabel').textContent=showingAll?'発表会場':'選択中の時間帯で使用する会場';
  byId('visitorMapUsage').hidden=!hasVenues;
  byId('visitorMaps').innerHTML=maps.map(m=>{
   const zones=state.zones.filter(z=>z.mapId===m.id);
+  const detail=`<div class="floor-detail" id="floor-detail-${m.id}" aria-live="polite" hidden></div>`;
   return `<article class="floor-card" id="floor-${esc(m.id)}">
    <div class="floor-card-header"><div><h3>${esc(floorLabel(m))}</h3><span class="floor-subtitle">${esc(m.name)}</span></div></div>
+   ${overview?detail:''}
    <div class="floor-tools"><span>図を拡大して会場をタップ</span><div class="floor-zoom"><button type="button" data-zoom-map="${m.id}" data-zoom-action="out" aria-label="${esc(m.name)}を縮小">−</button><span id="zoom-${m.id}">${visitorZoom[m.id]}%</span><button type="button" data-zoom-map="${m.id}" data-zoom-action="in" aria-label="${esc(m.name)}を拡大">＋</button><button type="button" class="zoom-reset" data-zoom-map="${m.id}" data-zoom-action="reset">戻す</button></div></div>
    <div class="floor-map-window ${m.id==='campus'?'campus-window':''}" id="window-${m.id}" data-map="${m.id}">
     <div class="map-stage ${m.id==='campus'?'campus-canvas':''}" id="stage-${m.id}" style="width:${visitorZoom[m.id]}%">
      <img src="${esc(m.src)}" draggable="false" alt="${esc(m.name)}">
      <div class="safety-layer">${safetyOverlayHtml(m.id,false)}</div>
-     <div class="map-zone-layer">${zones.map(z=>zoneHtml(z,activeIds.has(z.id),z.id===visitorSelected)).join('')}</div>
+     <div class="map-zone-layer">${zones.map(z=>zoneHtml(z,!overview&&activeIds.has(z.id),z.id===visitorSelected)).join('')}</div>
     </div>
    </div>
-   <div class="floor-detail" id="floor-detail-${m.id}" hidden></div>
+   ${overview?'':detail}
   </article>`;
  }).join('');
  byId('visitorMaps').querySelectorAll('[data-zone]').forEach(b=>b.addEventListener('click',()=>{
@@ -848,7 +873,7 @@ function renderAudienceMode(){
  const label=audienceMode==='internal'?'大豊学園':audienceMode==='admin'?'管理者':'一般来場者';
  chip.textContent=label;chip.classList.toggle('internal',audienceMode==='internal');
 }
-function showEntryGate(){byId('entryGate').hidden=false;byId('internalLoginForm').hidden=true;byId('internalLoginMessage').textContent='';}
+function showEntryGate(){byId('entryClosing').hidden=!festivalHasEnded();byId('entryGate').hidden=false;byId('internalLoginForm').hidden=true;byId('internalLoginMessage').textContent='';}
 function hideEntryGate(){byId('entryGate').hidden=true;}
 function choosePublic(){audienceMode='public';internalPresenterMap={};internalSurveyList=[];sessionStorage.setItem(ACCESS_MODE_KEY,'public');hideEntryGate();renderPublic();}
 byId('enterPublic')?.addEventListener('click',choosePublic);
@@ -886,12 +911,16 @@ function renderTv(){
  // Non-program states are single screens. Clear the page key so a subsequent program restarts at page one.
  const singleScreen=html=>{tvSlideKey='';tvSlideCount=1;tvSlideIndex=0;content.innerHTML=html;};
  if(v.date<state.eventDate){const now=new Date(v.date+'T00:00:00'),event=new Date(state.eventDate+'T00:00:00'),days=Math.max(0,Math.round((event-now)/86400000));singleScreen(`<div class="tv-message countdown"><span>おおフェスまで</span><strong>あと ${days} 日</strong><p>${esc(jpEventDate(state.eventDate))}</p></div>`);return;}
- if(v.date>state.eventDate){singleScreen('<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>');return;}
+ if(festivalHasEnded(v)){
+  const deadline=state.reactionDeadline||'';
+  const now=`${v.date}T${v.time}`;
+  const reception=deadline>now?`<p>リアクションは ${esc(deadline.slice(0,10).replaceAll('-','/'))} ${esc(deadline.slice(11,16))} まで受付中です。</p>`:'';
+  singleScreen(`<div class="tv-message"><strong>ご来場ありがとうございました。</strong><p>来年のおおフェスもお楽しみに！</p>${reception}</div>`);
+  return;
+ }
  const active=activePrograms();if(active.length){tvSlidesFor(active.every(isScheduleNotice)?'移動・準備中':'ただいま開催中',active);return;}
- const starts=all.map(p=>timeNum(programTimes(p).start));const ends=all.map(p=>timeNum(programTimes(p).end));const first=starts.length?Math.min(...starts):9999,last=ends.length?Math.max(...ends):-1;
- const deadlineTime=state.reactionDeadline?.startsWith(state.eventDate)?timeNum(state.reactionDeadline.slice(11,16)):17*60;
+ const first=all.length?Math.min(...all.map(p=>timeNum(programTimes(p).start))):Infinity;
  if(v.minute<first){singleScreen('<div class="tv-message"><strong>本日、おおフェス開催！</strong><p>まもなくプログラムが始まります。</p></div>');return;}
- if(v.minute>=last){if(v.minute<deadlineTime){singleScreen(`<div class="tv-message reaction"><strong>本日のプログラムは終了しました。</strong><p>リアクションは <b>${esc(state.reactionDeadline.slice(11,16))}</b> まで受付中です。<br>ぜひ発表への感想を届けてください。</p></div>`);}else{singleScreen('<div class="tv-message"><strong>今年のおおフェスも<br>ありがとうございました。</strong><p>次回もお楽しみに！</p></div>');}return;}
  const next=all.filter(p=>timeNum(programTimes(p).start)>v.minute);const nextStart=next.length?Math.min(...next.map(p=>timeNum(programTimes(p).start))):null;const group=nextStart===null?[]:next.filter(p=>timeNum(programTimes(p).start)===nextStart);
  if(group.length)tvSlidesFor(group.every(isScheduleNotice)?'次の予定':'次のプログラム',group);else singleScreen('<div class="tv-message"><strong>次のプログラムを準備中です。</strong></div>');
 }
@@ -1026,7 +1055,17 @@ function renderEditor(){
  renderEditForm();renderSafetyAdmin();
 }
 function selectZone(id){const z=getZone(id);if(!z)return;drawMode='';selectedSafetyId='';editDraft=clone(z);editId=z.id;renderEditor()}
+function renderPublishedVenueNote(){
+ const box=byId('publishedVenueNote');
+ if(!editDraft||!editId){box.hidden=true;return;}
+ const venue=publishedState?.zones.find(z=>z.id===editId);
+ box.textContent=venue
+  ? `公開中の補足情報　${venue.note.trim()||'（なし）'}`
+  : publishedState?'この会場は公開データにありません。':'公開中の補足情報を確認できません。';
+ box.hidden=false;
+}
 function renderEditForm(){const v=editDraft;
+ renderPublishedVenueNote();
  byId('venueForm').hidden=!v;byId('emptyVenueNote').hidden=!!v;
  if(!v)return;
  byId('zoneId').value=v.id;byId('zoneName').value=v.name;byId('zoneNote').value=v.note||'';byId('zoneKind').value=v.kind||'classroom';

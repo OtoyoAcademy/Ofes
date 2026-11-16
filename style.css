@@ -372,3 +372,10 @@ details.reactions-box:not([open]) > .reaction-content {display:none;}
 .tv-slide-hint{color:#61786a;font-size:.82em}
 @media (max-height:820px){.tv-body{gap:14px;padding:16px 24px}.tv-brand img{width:clamp(68px,9vh,110px);height:clamp(68px,9vh,110px)}.tv-brand h1{font-size:clamp(30px,5vh,60px)}.tv-brand p{font-size:clamp(17px,2vh,24px)}.tv-content{min-height:0}.tv-kicker{font-size:clamp(25px,4vh,40px);margin-bottom:10px}.tv-program-card{padding:18px}.tv-slides-control{margin-top:9px}}
 @media (max-width:760px){.tv-slides-control{gap:6px}.tv-slides-control button{padding:7px 9px}.tv-slide-hint{width:100%;text-align:center}.tv-content{min-height:0}}
+
+/* 開催終了後の入口と、学校全体図の会場案内 */
+.entry-closing{margin:14px 0;padding:13px;background:#e5f3ea;color:#20533b;border-radius:12px}
+.entry-closing p{margin:5px 0 0;color:inherit}
+.floor-detail .venue-note{line-height:1.65;overflow-wrap:anywhere;white-space:pre-line}
+#floor-campus .floor-detail{margin:0 0 12px}
+#publishedVenueNote{background:#eef5ef;border-radius:8px;padding:8px;overflow-wrap:anywhere}

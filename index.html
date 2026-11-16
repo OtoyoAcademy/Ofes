@@ -11,13 +11,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="OFES">
-  <link rel="stylesheet" href="style.css?v=153">
+  <link rel="stylesheet" href="style.css?v=156">
   <script defer src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="assets/vendor/jszip.min.js"></script>
-  <script defer src="app.js?v=155"></script>
+  <script defer src="app.js?v=156"></script>
   <script defer src="photo-collage.js?v=143"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script type="module" src="supabase-bridge.js?v=153"></script>
+  <script type="module" src="handover.js?v=156"></script>
 </head>
 <body>
 <!-- Ver.1.43: Supabaseパスワード再設定リンクから開ける独立画面 -->
@@ -42,6 +43,10 @@
     <img src="assets/ofes-logo.png" alt="OFES" class="entry-logo">
     <span class="eyebrow">OTOYO FESTIVAL</span>
     <h1>OFESへようこそ</h1>
+    <div id="entryClosing" class="entry-closing" hidden>
+      <strong>ご来場ありがとうございました。</strong>
+      <p>来年のおおフェスもお楽しみに！</p>
+    </div>
     <p>利用する入口を選んでください。</p>
     <div class="entry-options">
       <button type="button" id="enterPublic" class="entry-option primary"><strong>一般来場者</strong><span>プログラム・会場案内・スタンプラリーを見る</span></button>
@@ -92,7 +97,7 @@
   </section>
 
   <section class="tab-view" id="tab-venues">
-    <div class="section-heading"><h2>会場案内</h2><p>見たい棟を選び、会場をタップすると発表内容を確認できます。</p></div>
+    <div class="section-heading"><h2>会場案内</h2><p>地図の場所をタップすると、会場の案内や発表内容を確認できます。</p></div>
     <div class="building-tabs" id="buildingTabs" role="group" aria-label="会場案内の建物を選択">
       <button type="button" data-building="campus" class="active" aria-pressed="true">🏫<span>学校全体</span></button>
       <button type="button" data-building="zenki" aria-pressed="false">🏠<span>前期棟</span></button>
@@ -114,7 +119,7 @@
       <small>会場をタップすると、その場所で行われる発表を時間順に確認できます。</small>
     </div>
     <div id="safetyLegend" class="safety-legend safety-legend-panel" aria-label="安全情報の凡例" hidden><span><b class="safety-symbol extinguisher">🧯</b>消火器</span><span><b class="safety-symbol exit">EXIT</b>非常口</span><span><b class="safety-symbol aed">AED</b>AED</span><span><b class="safety-symbol assembly">集合</b>避難集合場所</span><span><i class="safety-route-sample"></i>避難経路</span></div>
-    <p id="visitorMapUsage" class="map-usage">図面は<strong>＋・−</strong>または2本指で拡大・縮小できます。会場をタップすると発表内容を確認できます。</p>
+    <p id="visitorMapUsage" class="map-usage">図面は<strong>＋・−</strong>または2本指で拡大・縮小できます。会場をタップすると案内を確認できます。</p>
     <div id="visitorMaps" class="floor-stack" aria-label="校舎のフロア図"></div>
     <div id="visitorMapLegend" class="legend"><span><i class="now"></i><span id="visitorMapLegendLabel">選択中の時間帯で使用する会場</span></span></div>
   </section>
@@ -159,8 +164,8 @@
 <div id="loginModal" class="modal admin-login-modal" hidden><div class="modal-inner"><h2>管理画面を開く</h2><p class="muted">このパスワードは管理画面を開くための簡易ロックです。Supabaseの書き込み権限は、別途Supabase Authで管理します。</p><form id="loginForm"><label>管理者パスワード<input type="password" id="adminPassword" required autocomplete="current-password"></label><p id="loginError" class="error"></p><div class="modal-actions"><button type="button" class="btn light" id="cancelLogin">キャンセル</button><button type="submit" class="btn primary">ログイン</button></div></form></div></div>
 
 <section id="adminPanel" class="admin-panel" hidden>
-  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.55 · 会場案内の時間帯ボタンを並べ替え</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
-  <nav class="admin-tabs" id="adminNav" aria-label="管理項目"><button data-admin="preflight" class="active">✅ 本番前チェック</button><button data-admin="firebase">🔑 Supabase接続</button><button data-admin="venues">会場・配置図</button><button data-admin="program">プログラム</button><button data-admin="reactions">リアクション集計</button><button data-admin="photos">📷 写真コラージュ</button><button data-admin="basic">年度・時刻テスト</button><button data-admin="surveys">アンケート</button><button data-admin="notice">お知らせPDF</button><button data-admin="stampqr">スタンプQR</button><button data-admin="years">年度データ</button><button data-admin="data">データ保存</button></nav>
+  <header class="admin-header"><div><span class="eyebrow">ADMINISTRATOR</span><h2>OFES 管理画面</h2><p>Ver.1.56 · 会場案内・開催終了後の表示・引き継ぎ</p></div><button id="closeAdmin" class="btn light">閉じる ×</button></header>
+  <nav class="admin-tabs" id="adminNav" aria-label="管理項目"><button data-admin="preflight" class="active">✅ 本番前チェック</button><button data-admin="firebase">🔑 Supabase接続</button><button data-admin="venues">会場・配置図</button><button data-admin="program">プログラム</button><button data-admin="reactions">リアクション集計</button><button data-admin="photos">📷 写真コラージュ</button><button data-admin="basic">年度・時刻テスト</button><button data-admin="surveys">アンケート</button><button data-admin="notice">お知らせPDF</button><button data-admin="stampqr">スタンプQR</button><button data-admin="years">年度データ</button><button data-admin="data">データ保存</button><button data-admin="handover">引き継ぎマニュアル</button></nav>
 
 
   <div class="admin-page active" id="admin-preflight">
@@ -229,6 +234,7 @@
             <p class="caption">会場IDは変更できます。既存会場のIDを変更して保存すると、その会場を指定しているプログラムも新しいIDへ自動更新されます。同じIDは重複登録できません。</p>
             <label>会場名<input id="zoneName" maxlength="48" placeholder="例：9年生教室" required></label>
             <label>補足情報（任意）<input id="zoneNote" maxlength="100" placeholder="例：探究学習の展示"></label>
+            <p id="publishedVenueNote" class="caption" role="status" hidden></p>
             <label>種類<select id="zoneKind"><option value="classroom">教室</option><option value="exhibit">展示場所</option><option value="hall">体育館・ホール</option><option value="building">建物</option><option value="parking">駐車場・入口</option><option value="other">その他</option></select></label>
             <div class="four-cols"><label>左位置 %<input id="zoneX" type="number" min="0" max="100" step="0.1"></label><label>上位置 %<input id="zoneY" type="number" min="0" max="100" step="0.1"></label><label>幅 %<input id="zoneW" type="number" min="0.1" max="100" step="0.1"></label><label>高さ %<input id="zoneH" type="number" min="0.1" max="100" step="0.1"></label></div>
             <div class="row-actions"><button type="submit" class="btn primary" aria-describedby="venuePublishHint">この会場を保存</button><button type="button" id="attachDemo" class="btn light">リアクション表示を試す</button><button type="button" id="deleteVenue" class="btn danger">削除</button></div>
@@ -486,6 +492,23 @@
       <h3>保存済みの年度</h3>
       <div id="yearArchiveList" class="year-archive-list"><p class="muted">一覧を読み込んでいます…</p></div><div id="yearArchivePreview" class="year-archive-preview" hidden></div>
       <p class="caption"><strong>前年度をコピー：</strong>保存した年度を現在の下書きへコピーし、新しい年度・開催日に変更してから編集します。コピーしただけでは来場者には公開されません。<br><strong>削除：</strong>試行期間中の不要な年度データは削除できます。削除後は元に戻せないため、必要なら先にJSONも保存してください。</p>
+    </div>
+  </div>
+
+  <div class="admin-page" id="admin-handover">
+    <div class="editor-card basic-card">
+      <h3>引き継ぎマニュアル</h3>
+      <p>ブラウザの印刷画面で「PDFに保存」を選んでください。</p>
+      <div class="row-actions"><button type="button" id="handoverQuick" class="btn primary">簡易版（A3横・1枚）</button><button type="button" id="handoverDetailed" class="btn light">詳細版（A4縦）</button></div>
+      <form id="handoverForm" autocomplete="off" hidden>
+        <h4>詳細版に載せるログイン情報</h4>
+        <label>学校管理用のメールアドレス<input type="email" id="handoverEmail" autocomplete="off"></label>
+        <label>Supabase管理者パスワード<input type="password" id="handoverPassword" autocomplete="off"></label>
+        <label>OFES管理者画面のパスワード<input type="password" id="handoverAppPassword" autocomplete="off"></label>
+        <p class="caption">入力した情報は作成する詳細版に記載します。PDFは後任の担当者と学校で指定した保管先に限って共有してください。</p>
+        <div class="row-actions"><button type="submit" class="btn primary">詳細版を開く</button><button type="button" id="handoverCancel" class="btn light">閉じる</button></div>
+      </form>
+      <p class="caption" id="handoverStatus" role="status"></p>
     </div>
   </div>
 
