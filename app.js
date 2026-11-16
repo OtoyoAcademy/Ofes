@@ -308,7 +308,11 @@ window.addEventListener('storage',(event)=>{
  }catch(error){console.warn('別タブのテスト日時を反映できませんでした',error);}
 });
 function activePrograms(){const t=viewTime();return state.programs.filter(p=>{const pt=programTimes(p);return t.date===state.eventDate && timeNum(pt.start)<=t.minute && t.minute<timeNum(pt.end)})}
-function scheduledPrograms(){if(session==='current')return activePrograms();return state.programs.filter(p=>p.session===session)}
+function scheduledPrograms(){
+ if(session==='current')return activePrograms();
+ if(session==='all')return state.programs;
+ return state.programs.filter(p=>p.session===session);
+}
 function orderedPrograms(){return [...state.programs].sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||String(a.zoneId).localeCompare(String(b.zoneId))||String(a.id).localeCompare(String(b.id)))}
 function roomLabel(p){return getZone(p.zoneId)?.name||(venueNotRequired(p)?'会場指定なし':'会場未登録')}
 // 移動準備などの時間割上の案内は、発表用ステータス・会場・リアクションを表示しない。
@@ -449,9 +453,20 @@ byId('toggleSafetyInfo')?.addEventListener('click',()=>{
 });
 function renderSessionButtons(){
  const shortMarks={s1:'①',s2:'②',s3:'③',s4:'④'};
- const entries=[{id:'current',label:'現在',aria:'現在の時間帯'},...SESSION_IDS.map((id)=>{const d=sessionDef(id);return {id,label:`${shortMarks[id]}${d.start}〜${d.end}`,aria:`${sessionLabel(id)} ${d.start}〜${d.end}`}})];
+ const entries=[
+  {id:'current',label:'現在',aria:'現在の時間帯'},
+  {id:'all',label:'指定なし',aria:'指定なし（全時間帯）'},
+  ...SESSION_IDS.map(id=>{
+   const d=sessionDef(id);
+   return {id,label:`${shortMarks[id]}${d.start}〜${d.end}`,aria:`${sessionLabel(id)} ${d.start}〜${d.end}`};
+  })
+ ];
  byId('sessionSwitch').innerHTML=entries.map(({id,label,aria})=>`<button data-session="${id}" class="${id===session?'active':''}" aria-pressed="${id===session}" aria-label="${esc(aria)}">${esc(label)}</button>`).join('');
- $$('[data-session]').forEach(b=>b.onclick=()=>{session=b.dataset.session;renderVisitorMap();});
+ $$('#sessionSwitch [data-session]').forEach(b=>b.onclick=()=>{
+  session=b.dataset.session;
+  renderVisitorMap();
+  byId('sessionSwitch').querySelector('[aria-pressed="true"]')?.focus({preventScroll:true});
+ });
 }
 function zStyle(z){return `left:${bound(z.x,0,100)}%;top:${bound(z.y,0,100)}%;width:${bound(z.w,.1,100)}%;height:${bound(z.h,.1,100)}%;`}
 function zoneHtml(z,active,selected){const label=z.name||z.id;return `<button type="button" class="zone ${active?'on':''} ${selected?'selected':''}" style="${zStyle(z)}" data-zone="${esc(z.id)}" title="${esc(z.name)}" aria-label="${esc(z.name)}"><span class="zone-caption">${esc(label)}</span></button>`}
@@ -475,14 +490,12 @@ function floorLabel(m){return m.floor?`${m.floor}階`:'学校全体図'}
 function floorDetailHtml(m){
  const z=getZone(visitorSelected);
  if(!z||z.mapId!==m.id)return '';
- // Only show details of venues with an actual scheduled program in the selected time slot.
- const scheduledIds=new Set(scheduledPrograms().map(p=>p.id));
- let ps=state.programs.filter(p=>p.zoneId===z.id&&scheduledIds.has(p.id)).slice();
+ const ps=scheduledPrograms().filter(p=>p.zoneId===z.id);
  if(reactionPreviewMode&&reactionPreviewProgram?.zoneId===z.id&&!ps.some(p=>p.id===reactionPreviewProgram.id))ps.push(reactionPreviewProgram);
  if(!ps.length)return `<h4>${esc(z.name)}</h4>${z.note?`<p>${esc(z.note)}</p>`:''}`;
  ps.sort((a,b)=>timeNum(programTimes(a).start)-timeNum(programTimes(b).start)||timeNum(programTimes(a).end)-timeNum(programTimes(b).end)||String(a.id).localeCompare(String(b.id)));
- return `<h4>${esc(z.name)} <span class="pill">${esc(z.id)}</span></h4>${z.note?`<p>${esc(z.note)}</p>`:''}
- <p class="muted">${esc(m.name)}　登録されている発表：${ps.length}件</p>
+ return `<h4>${esc(z.name)}</h4>${z.note?`<p>${esc(z.note)}</p>`:''}
+ <p class="muted">${esc(m.name)}</p>
  <div class="venue-program-list">${ps.map(p=>{const pt=programTimes(p),st=programStatus(p);return `<article class="venue-program-item status-border-${st.key}"><div class="venue-program-meta">${statusBadgeHtml(p)}<strong>${esc(sessionLabel(p.session))}</strong><span>${esc(pt.start)}〜${esc(pt.end)}</span></div><div class="venue-program-title">${p.grade?`<span class="program-grade">${esc(p.grade)}</span> `:''}${p.group?`<span class="program-group">${esc(p.group)}</span> `:''}${esc(p.title)}</div>${presentersHtml(p)}${isScheduleNotice(p)?'':reactionsHtml(p)}</article>`}).join('')}</div>`;
 }
 function updateSelectedFloorDetails(){
@@ -564,18 +577,20 @@ function renderVisitorMap(){
  if(byId('safetyLegend'))byId('safetyLegend').hidden=!safetyPublished||!safetyVisible;
  const maps=visibleMaps();
  const programs=scheduledPrograms(),activeIds=new Set(programs.map(p=>p.zoneId).filter(Boolean));
- const count=state.zones.filter(z=>maps.some(m=>m.id===z.mapId)).length;
- // 登録済みの場所は発表がない時間帯でも表示する。色だけ現在の発表有無に連動。
+ const hasVenues=state.zones.some(z=>maps.some(m=>m.id===z.mapId));
+ // 会場マーカーは常に表示し、選択した時間帯に発表がある会場を強調する。
  if(visitorSelected&&!state.zones.some(z=>z.id===visitorSelected))visitorSelected='';
- const mapVisible=maps;
- const buildingName={campus:'学校全体',zenki:'前期棟',koki:'後期棟'}[visitorBuilding];
- byId('mapSummary').textContent=session==='current'?`現在：${viewTime().time}　${buildingName}の登録済み会場：${count}か所`:`${sessionLabel(session)}（${sessionDef(session).start}〜${sessionDef(session).end}）　${buildingName}の登録済み会場：${count}か所`;
- const legend=byId('visitorMapLegend');if(legend)legend.hidden=count===0;
- const usage=byId('visitorMapUsage');if(usage)usage.hidden=count===0;
- byId('visitorMaps').innerHTML=mapVisible.map(m=>{
-  const zones=state.zones.filter(z=>z.mapId===m.id),floorCount=zones.length;
+ const period=sessionDef(session);
+ byId('mapSummary').textContent=period
+  ? `${period.label}（${period.start}〜${period.end}）`
+  : session==='all'?'全時間帯の発表を表示':`現在：${viewTime().time}`;
+ byId('visitorMapLegend').hidden=!hasVenues;
+ byId('visitorMapLegendLabel').textContent=session==='all'?'発表会場':'選択中の時間帯で使用する会場';
+ byId('visitorMapUsage').hidden=!hasVenues;
+ byId('visitorMaps').innerHTML=maps.map(m=>{
+  const zones=state.zones.filter(z=>z.mapId===m.id);
   return `<article class="floor-card" id="floor-${esc(m.id)}">
-   <div class="floor-card-header"><div><h3>${esc(floorLabel(m))}</h3><span class="floor-subtitle">${esc(m.name)}</span></div><span class="floor-count">${floorCount}か所 登録</span></div>
+   <div class="floor-card-header"><div><h3>${esc(floorLabel(m))}</h3><span class="floor-subtitle">${esc(m.name)}</span></div></div>
    <div class="floor-tools"><span>図を拡大して会場をタップ</span><div class="floor-zoom"><button type="button" data-zoom-map="${m.id}" data-zoom-action="out" aria-label="${esc(m.name)}を縮小">−</button><span id="zoom-${m.id}">${visitorZoom[m.id]}%</span><button type="button" data-zoom-map="${m.id}" data-zoom-action="in" aria-label="${esc(m.name)}を拡大">＋</button><button type="button" class="zoom-reset" data-zoom-map="${m.id}" data-zoom-action="reset">戻す</button></div></div>
    <div class="floor-map-window ${m.id==='campus'?'campus-window':''}" id="window-${m.id}" data-map="${m.id}">
     <div class="map-stage ${m.id==='campus'?'campus-canvas':''}" id="stage-${m.id}" style="width:${visitorZoom[m.id]}%">
@@ -1001,6 +1016,7 @@ function renderEditor(){
  const stage=byId('adminStage');stage.classList.toggle('drawing',Boolean(drawMode));stage.classList.toggle('campus-canvas',adminMap==='campus');
  byId('drawGuide').textContent=drawMode?(drawMode.includes('safety-point')?'安全設備：図面上の位置を1回タップしてください。':drawMode.includes('safety-route')?'避難経路：開始地点から終了地点までドラッグしてください。':`${drawMode==='new'?'新しい会場':'位置の再指定'}：図面上で教室の枠をドラッグして囲んでください。`):'登録済みの会場または安全情報をタップすると編集できます。';
  const zones=state.zones.filter(z=>z.mapId===adminMap);
+ byId('adminMapZoneCount').textContent=`${zones.length}か所`;
  byId('adminZoneLayer').innerHTML=zones.map(z=>zoneHtml(z,false,z.id===editId)).join('')+(editDraft&&editDraft.mapId===adminMap&&!zones.some(z=>z.id===(editId||editDraft.id))?zoneHtml(editDraft,false,true):'');
  byId('adminSafetyLayer').innerHTML=safetyOverlayHtml(adminMap,true);
  $$('#adminZoneLayer [data-zone]').forEach(el=>{el.onclick=()=>selectZone(el.dataset.zone);});
