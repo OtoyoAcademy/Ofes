@@ -454,8 +454,8 @@ byId('toggleSafetyInfo')?.addEventListener('click',()=>{
 function renderSessionButtons(){
  const shortMarks={s1:'①',s2:'②',s3:'③',s4:'④'};
  const entries=[
-  {id:'current',label:'現在',aria:'現在の時間帯'},
   {id:'all',label:'指定なし',aria:'指定なし（全時間帯）'},
+  {id:'current',label:'現在',aria:'現在の時間帯'},
   ...SESSION_IDS.map(id=>{
    const d=sessionDef(id);
    return {id,label:`${shortMarks[id]}${d.start}〜${d.end}`,aria:`${sessionLabel(id)} ${d.start}〜${d.end}`};
