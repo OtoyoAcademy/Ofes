@@ -49,11 +49,34 @@ const SAFETY_TYPES={
  aed:{label:'AED',icon:'AED'},
  assembly:{label:'避難集合場所',icon:'集合'}
 };
+const CAMPUS_NOTICE_FIELDS=[
+ ['title','表題',20,'おおフェスアプリ'],
+ ['scan','QRコードの見出し',24,'スマホのカメラで読み取って開く'],
+ ['visitorHeading','一般来場者への見出し',27,'一般来場者の方もご利用いただけます。'],
+ ['visitorMessage','一般来場者への案内',62,'最初の画面で「一般来場者」を選ぶと、パスワードなしで使えます。'],
+ ['installHeading','ホーム画面への追加の見出し',29,'スマホのホーム画面に追加する方法'],
+ ['iphoneHeading','iPhoneの見出し',20,'iPhone（Safari）'],
+ ['iphone1','iPhone 手順1',36,'Safariでアプリを開く'],
+ ['iphone2','iPhone 手順2',36,'「共有」→「ホーム画面に追加」'],
+ ['iphone3','iPhone 手順3',36,'「追加」をタップ'],
+ ['androidHeading','Androidの見出し',20,'Android（Chrome）'],
+ ['android1','Android 手順1',36,'Chromeでアプリを開く'],
+ ['android2','Android 手順2',36,'右上の「⋮」→「ホーム画面に追加」'],
+ ['android3','Android 手順3',36,'「インストール」または「ショートカットを作成」を選ぶ'],
+ ['schoolNote','大豊学園関係者向けの注記',85,'※ 大豊学園関係者用のパスワードは、事前に配布したお知らせに記載しています。'],
+];
+function normalizeCampusNotice(saved){
+ return Object.fromEntries(CAMPUS_NOTICE_FIELDS.map(([key,,limit,defaultText])=>{
+  const value=typeof saved?.[key]==='string'?saved[key].replace(/[\r\n]+/g,' ').trim().slice(0,limit):'';
+  return [key,value||defaultText];
+ }));
+}
 const DEFAULT_DATA = {
  year:'2026', eventDate:'2026-11-21', slogan:'挑戦・協働・創造', reactionDeadline:'2026-11-21T17:00',
  campusCanvasVersion:3,
  noticeTitle:'おおフェス（OFES）Webアプリのご案内', // 旧版の保存データとの互換用
  noticeDistributionDate:'',
+ campusNotice:normalizeCampusNotice(),
  noticeMessage:'今年度のおおフェスでは、プログラムや会場案内などをスマートフォンで確認できるWebアプリ「OFES」をご利用いただけます。会場での移動や発表見学に、ぜひご活用ください。',
  noticeIssuer:'大豊学園',
  internalPasscode:'', stampCompleteImage:'', stampHints:['','','','',''], surveys:[],
@@ -158,6 +181,7 @@ function validData(v){
  // Ver.1.14: リアクションは「学年 + 発表グループ + 発表内容」を1つの発表単位として扱う。
  // 同じグループが複数セッションで同じ発表を行う場合だけreactionIdを共有する。
  syncReactionGroups(out);
+ out.campusNotice=normalizeCampusNotice(v.campusNotice);
  out.noticeTitle=String(v.noticeTitle||DEFAULT_DATA.noticeTitle);
  out.noticeDistributionDate=/^\d{4}-\d{2}-\d{2}$/.test(String(v.noticeDistributionDate||''))
   ?String(v.noticeDistributionDate):'';
@@ -346,7 +370,8 @@ window.OFESCloud={
    const test=draftState.test,passcode=draftState.year===publishedState.year?draftState.internalPasscode:'';
    backupDraftBeforeSync();
    const noticeDistributionDate=draftState.year===publishedState.year?draftState.noticeDistributionDate:'';
-   draftState={...clone(publishedState),test,internalPasscode:passcode,noticeDistributionDate};applyAdminInternalToDraft();state=draftState;if(!persist())throw Error('下書きの端末保存に失敗しました。');editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
+   const campusNotice=draftState.campusNotice;
+   draftState={...clone(publishedState),test,internalPasscode:passcode,noticeDistributionDate,campusNotice};applyAdminInternalToDraft();state=draftState;if(!persist())throw Error('下書きの端末保存に失敗しました。');editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
    renderAdmin();renderPublic();toast('Supabaseの公開データを編集用に読み込みました');
   }
 };
@@ -1785,6 +1810,7 @@ byId('addSurvey')?.addEventListener('click',()=>{const n=(state.surveys||[]).len
 let noticePasscodeManuallyEdited=false;
 let noticePasscodeYear=null;
 function renderNotice(){
+ for(const [key] of CAMPUS_NOTICE_FIELDS)campusNoticeForm.elements[key].value=state.campusNotice[key];
  byId('noticeDistributionDate').value=state.noticeDistributionDate||'';
  byId('noticeMessage').value=state.noticeMessage||DEFAULT_DATA.noticeMessage;
  byId('noticeIssuer').value=state.noticeIssuer||DEFAULT_DATA.noticeIssuer;
@@ -1921,6 +1947,105 @@ byId('printNotice').onclick=()=>{
  <div class="note">※ OFESはWebアプリです。一般来場者は「一般来場者」から利用できます。児童生徒名は一般来場者には表示されません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div>
  </body></html>`;
  w.document.open();w.document.write(html);w.document.close();
+};
+
+const campusNoticeForm=byId('campusNoticeForm');
+byId('campusNoticeFields').innerHTML=CAMPUS_NOTICE_FIELDS.map(([key,label,limit])=>
+ `<label>${label}<input name="${key}" maxlength="${limit}" required></label>`
+).join('');
+function readCampusNotice(){
+ return normalizeCampusNotice(Object.fromEntries(new FormData(campusNoticeForm)));
+}
+campusNoticeForm.onsubmit=e=>{
+ e.preventDefault();
+ state.campusNotice=readCampusNotice();
+ if(persist()){
+  for(const [key] of CAMPUS_NOTICE_FIELDS)campusNoticeForm.elements[key].value=state.campusNotice[key];
+  toast('校内掲示用の文面を保存しました');
+ }
+};
+
+function campusNoticeHtml(copy){
+ const {title,scan,visitorHeading,visitorMessage,installHeading,iphoneHeading,iphone1,iphone2,iphone3,androidHeading,android1,android2,android3,schoolNote}=
+  Object.fromEntries(Object.entries(copy).map(([key,value])=>[key,esc(value)]));
+ const qr=esc(new URL('assets/app-qr.png',location.href).href);
+ const logo=esc(new URL('assets/ofes-logo.png',location.href).href);
+ const url=esc(STAMP_BASE_URL);
+ return `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}｜校内掲示用</title>
+<style>
+ @page{size:A4 portrait;margin:0}
+ *{box-sizing:border-box}
+ body{margin:0;color:#172d23;background:#edf3ee;font-family:"Yu Gothic","Noto Sans CJK JP",Meiryo,sans-serif;line-height:1.5}
+ .toolbar{max-width:210mm;margin:auto;padding:8px 16px;text-align:right}
+ .toolbar button{padding:8px 14px;background:white;color:#173f30;border:1px solid #779c87;border-radius:6px;font:inherit;cursor:pointer}
+ .sheet{overflow-wrap:anywhere;max-width:210mm;margin:0 auto 16px;padding:12mm 15mm;background:white}
+ .brand{display:flex;justify-content:center;align-items:center;gap:5mm;padding-bottom:5mm;border-bottom:1.2mm solid #207044}
+ .brand img{width:17mm;height:19mm;object-fit:contain}
+ h1,h2,p{margin:0}
+ h1{font-size:30pt;line-height:1.18}
+ .scan{text-align:center;margin:6mm 0 7mm}
+ .scan h2{font-size:21pt}
+ .qr{display:block;width:min(82mm,100%);height:auto;image-rendering:pixelated;margin:2mm auto 1mm}
+ .url{font-size:11pt;color:#385646;overflow-wrap:anywhere}
+ .access{margin:4mm auto 0;padding:3mm 4mm;border-radius:2mm;background:#edf6ee;color:#174b32;font-size:15pt;line-height:1.55}
+ .install h2{font-size:18pt;margin:0 0 2.7mm}
+ .phones{display:grid;grid-template-columns:1fr 1fr;gap:4mm}
+ .phone{padding:3.5mm 4.5mm;border:1px solid #a8c5b2;border-radius:2mm}
+ .phone h3{margin:0 0 1.5mm;color:#174b32;font-size:14pt}
+ .phone ol{margin:0;padding-left:5.5mm;font-size:12pt}
+ .phone li+li{margin-top:1mm}
+ .school-note{margin-top:5mm;padding-top:3mm;border-top:1px solid #a8c5b2;font-size:9.5pt;color:#425e4e}
+ @media screen and (max-width:560px){
+  .sheet{padding:18px}.brand img{width:44px;height:50px}h1{font-size:24pt}.phones{grid-template-columns:1fr}
+ }
+ @media print{
+  body{background:white;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .toolbar{display:none}
+  .sheet{margin:0;padding-block:10mm}
+  .brand{padding-bottom:4mm}
+  h1{font-size:24pt}
+  .scan{margin:5mm 0}
+  .scan h2{font-size:18pt}
+  .qr{width:82mm}
+  .access{font-size:13pt;line-height:1.4}
+  .install h2{font-size:16pt}
+  .phone h3{font-size:12pt}
+  .phone ol{font-size:11pt;line-height:1.4}
+  .school-note{margin-top:4mm}
+ }
+</style>
+</head>
+<body>
+ <div class="toolbar"><button type="button" onclick="window.print()">印刷／PDFとして保存</button></div>
+ <main class="sheet">
+  <header class="brand"><img src="${logo}" alt=""><h1>${title}</h1></header>
+  <section class="scan">
+   <h2>${scan}</h2>
+   <img class="qr" src="${qr}" alt="おおフェスアプリを開くQRコード">
+   <p class="url"><a href="${url}">${url}</a></p>
+   <p class="access"><strong>${visitorHeading}</strong><br>${visitorMessage}</p>
+  </section>
+  <section class="install">
+   <h2>${installHeading}</h2>
+   <div class="phones">
+    <div class="phone"><h3>${iphoneHeading}</h3><ol><li>${iphone1}</li><li>${iphone2}</li><li>${iphone3}</li></ol></div>
+    <div class="phone"><h3>${androidHeading}</h3><ol><li>${android1}</li><li>${android2}</li><li>${android3}</li></ol></div>
+   </div>
+  </section>
+  <p class="school-note">${schoolNote}</p>
+ </main>
+</body>
+</html>`;
+}
+byId('printCampusNotice').onclick=()=>{
+ const w=window.open('','OFES_CAMPUS_NOTICE_PDF','width=900,height=1000');
+ if(!w){alert('印刷画面を開けませんでした。ポップアップを許可してください。');return;}
+ w.document.open();w.document.write(campusNoticeHtml(readCampusNotice()));w.document.close();
 };
 
 byId('exportJson').onclick=()=>downloadDraftJson(JSON.stringify({version:18,data:draftState},null,2),`OFES_${draftState.year}_backup.json`);
