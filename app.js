@@ -52,7 +52,8 @@ const SAFETY_TYPES={
 const DEFAULT_DATA = {
  year:'2026', eventDate:'2026-11-21', slogan:'挑戦・協働・創造', reactionDeadline:'2026-11-21T17:00',
  campusCanvasVersion:3,
- noticeTitle:'おおフェス（OFES）Webアプリのご案内',
+ noticeTitle:'おおフェス（OFES）Webアプリのご案内', // 旧版の保存データとの互換用
+ noticeDistributionDate:'',
  noticeMessage:'今年度のおおフェスでは、プログラムや会場案内などをスマートフォンで確認できるWebアプリ「OFES」をご利用いただけます。会場での移動や発表見学に、ぜひご活用ください。',
  noticeIssuer:'大豊学園',
  internalPasscode:'', stampCompleteImage:'', stampHints:['','','','',''], surveys:[],
@@ -158,6 +159,8 @@ function validData(v){
  // 同じグループが複数セッションで同じ発表を行う場合だけreactionIdを共有する。
  syncReactionGroups(out);
  out.noticeTitle=String(v.noticeTitle||DEFAULT_DATA.noticeTitle);
+ out.noticeDistributionDate=/^\d{4}-\d{2}-\d{2}$/.test(String(v.noticeDistributionDate||''))
+  ?String(v.noticeDistributionDate):'';
  out.noticeMessage=String(v.noticeMessage||DEFAULT_DATA.noticeMessage);
  out.noticeIssuer=String(v.noticeIssuer||DEFAULT_DATA.noticeIssuer);
  out.internalPasscode=String(v.internalPasscode||'');
@@ -342,7 +345,8 @@ window.OFESCloud={
    if(!publishedState)throw Error('Supabaseにはまだ公開データがありません。');
    const test=draftState.test,passcode=draftState.year===publishedState.year?draftState.internalPasscode:'';
    backupDraftBeforeSync();
-   draftState={...clone(publishedState),test,internalPasscode:passcode};applyAdminInternalToDraft();state=draftState;if(!persist())throw Error('下書きの端末保存に失敗しました。');editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
+   const noticeDistributionDate=draftState.year===publishedState.year?draftState.noticeDistributionDate:'';
+   draftState={...clone(publishedState),test,internalPasscode:passcode,noticeDistributionDate};applyAdminInternalToDraft();state=draftState;if(!persist())throw Error('下書きの端末保存に失敗しました。');editId='';editDraft=null;selectedSafetyId='';drawMode='';adminMap='campus';
    renderAdmin();renderPublic();toast('Supabaseの公開データを編集用に読み込みました');
   }
 };
@@ -1079,7 +1083,7 @@ async function renderYearArchives(){
 }
 async function previewYearArchive(year){try{const payload=await window.OFESArchives.load(year);if(!payload)throw Error('年度データが見つかりません。');const data=validData(payload),box=byId('yearArchivePreview');const list=orderedArchivePrograms(data);box.hidden=false;box.innerHTML=`<div class="year-preview-head"><div><strong>${esc(data.year)}年度</strong><span>${esc(data.eventDate)}　${esc(data.slogan)}</span></div><button type="button" class="btn light" id="closeYearPreview">閉じる</button></div><p>会場 ${data.zones.length}か所 ／ プログラム ${data.programs.length}件</p><div class="year-preview-programs">${list.map(p=>{const d=data.sessions?.[p.session],start=d?.start||p.start,end=d?.end||p.end;const zone=data.zones.find(z=>z.id===p.zoneId)?.name||'会場未設定';return `<article><time>${esc(start)}〜${esc(end)}</time><div><strong>${esc(p.title)}</strong><span>${esc([p.grade,p.group].filter(Boolean).join(' '))}</span><small>${esc(zone)}</small></div></article>`;}).join('')}</div>`;byId('closeYearPreview').onclick=()=>{box.hidden=true;};}catch(err){alert(`年度データを表示できませんでした：${err.message||err}`);}}
 function orderedArchivePrograms(data){return [...data.programs].sort((a,b)=>{const sa=data.sessions?.[a.session]?.start||a.start||'99:99',sb=data.sessions?.[b.session]?.start||b.start||'99:99';return timeNum(sa)-timeNum(sb)||String(a.id).localeCompare(String(b.id));});}
-async function copyYearArchive(year){try{const payload=await window.OFESArchives.load(year);if(!payload)throw Error('年度データが見つかりません。');const defaultYear=String(Number(year)+1||state.year);const newYear=prompt(`${year}年度の内容をコピーします。新しい年度を入力してください。`,defaultYear);if(!newYear)return;const newDate=prompt('新しい開催日を YYYY-MM-DD で入力してください。',`${newYear}-11-01`);if(!/^\d{4}-\d{2}-\d{2}$/.test(newDate||''))return alert('開催日の形式が正しくありません。');const next=validData(payload);next.year=newYear;next.eventDate=newDate;next.reactionDeadline=`${newDate}T17:00`;next.internalPasscode='';next.test={enabled:false,date:newDate,time:'09:25'};draftState=next;state=draftState;editorActive=true;persist();renderAdmin();renderPublic();alert(`${year}年度を${newYear}年度の下書きとしてコピーしました。パスコードと開催内容を確認してから公開してください。`);}catch(err){alert(`コピーできませんでした：${err.message||err}`);}}
+async function copyYearArchive(year){try{const payload=await window.OFESArchives.load(year);if(!payload)throw Error('年度データが見つかりません。');const defaultYear=String(Number(year)+1||state.year);const newYear=prompt(`${year}年度の内容をコピーします。新しい年度を入力してください。`,defaultYear);if(!newYear)return;const newDate=prompt('新しい開催日を YYYY-MM-DD で入力してください。',`${newYear}-11-01`);if(!/^\d{4}-\d{2}-\d{2}$/.test(newDate||''))return alert('開催日の形式が正しくありません。');const next=validData(payload);next.year=newYear;next.eventDate=newDate;next.noticeDistributionDate='';next.reactionDeadline=`${newDate}T17:00`;next.internalPasscode='';next.test={enabled:false,date:newDate,time:'09:25'};draftState=next;state=draftState;editorActive=true;persist();renderAdmin();renderPublic();alert(`${year}年度を${newYear}年度の下書きとしてコピーしました。パスコードと開催内容を確認してから公開してください。`);}catch(err){alert(`コピーできませんでした：${err.message||err}`);}}
 async function deleteYearArchive(year){if(!confirm(`${year}年度の保存データを削除しますか？\nこの操作は元に戻せません。`))return;try{await window.OFESArchives.remove(year);await renderYearArchives();}catch(err){alert(`削除できませんでした：${err.message||err}`);}}
 byId('saveYearArchive')?.addEventListener('click',async()=>{const msg=byId('yearArchiveMessage');try{if(!window.OFESArchives)throw Error('Supabase接続準備中です。');if(!confirm(`${state.year}年度の現在の下書きを年度データとして保存しますか？`))return;await window.OFESArchives.save(projectArchive(draftState));msg.textContent=`${state.year}年度を保存しました。`;await renderYearArchives();}catch(err){msg.textContent=`保存できませんでした：${err.message||err}`;}});
 byId('refreshYearArchives')?.addEventListener('click',renderYearArchives);
@@ -1125,7 +1129,7 @@ function renderPreflight(){
  const reactionOk=deadlineMinute>=lastEnd&&deadlineMinute>0;
  const stampOk=Boolean(state.stampCompleteImage);
  const safetyOk=state.showSafetyInfo!==true||(state.safetyItems||[]).length>0;
- const noticeOk=Boolean(String(state.noticeTitle||'').trim()&&String(state.noticeMessage||'').trim()&&String(state.noticeIssuer||'').trim());
+ const noticeOk=Boolean(state.noticeDistributionDate&&String(state.noticeMessage||'').trim()&&String(state.noticeIssuer||'').trim());
  const cloudText=byId('firebasePublishSummary')?.textContent||'';
  const sdkText=byId('firebaseSdkStatus')?.textContent||'';
  const cloudOk=/公開中：/.test(cloudText)&&/接続準備完了/.test(sdkText);
@@ -1144,7 +1148,7 @@ function renderPreflight(){
   {ok:safetyOk,title:'安全情報の公開',detail:state.showSafetyInfo===true?(safetyOk?`${state.safetyItems.length}件登録／来場者へ公開`:'公開ON：消火器・避難経路等を確認'):'公開OFF：来場者画面には表示しません（登録データは保持）',tab:'venues'},
   {ok:tvOk,title:'TV表示',detail:tvOk?'開催日・プログラムから自動表示':'開催日・プログラムを確認',tab:'basic'},
   {ok:backupOk,title:'最新バックアップ',detail:backupOk?'公開前の復元ポイントあり':'復元ポイントを確認してください',tab:'data'},
-  {ok:noticeOk,title:'お知らせPDF',detail:noticeOk?'案内文を設定済み':'案内文・発行者を確認',tab:'notice'}
+  {ok:noticeOk,title:'お知らせPDF',detail:noticeOk?'案内文を設定済み':'配布日・案内文・発行者を確認',tab:'notice'}
  ];
  const done=checks.filter(c=>c.ok).length,total=checks.length;
  score.textContent=`${done}/${total}`;badge.textContent=done===total?'準備OK':'要確認';badge.classList.toggle('ok',done===total);
@@ -1781,7 +1785,7 @@ byId('addSurvey')?.addEventListener('click',()=>{const n=(state.surveys||[]).len
 let noticePasscodeManuallyEdited=false;
 let noticePasscodeYear=null;
 function renderNotice(){
- byId('noticeTitle').value=state.noticeTitle||DEFAULT_DATA.noticeTitle;
+ byId('noticeDistributionDate').value=state.noticeDistributionDate||'';
  byId('noticeMessage').value=state.noticeMessage||DEFAULT_DATA.noticeMessage;
  byId('noticeIssuer').value=state.noticeIssuer||DEFAULT_DATA.noticeIssuer;
  byId('noticeAppUrl').textContent=appPublicUrl();
@@ -1806,12 +1810,16 @@ byId('noticeInternalPasscode')?.addEventListener('input',e=>{
 byId('noticePasscodeVisible')?.addEventListener('change',e=>{
  byId('noticeInternalPasscode').type=e.target.checked?'text':'password';
 });
-byId('saveNotice').onclick=()=>{
- state.noticeTitle=byId('noticeTitle').value.trim()||DEFAULT_DATA.noticeTitle;
+function saveNoticeSettings(){
+ state.noticeDistributionDate=byId('noticeDistributionDate').value;
  state.noticeMessage=byId('noticeMessage').value.trim()||DEFAULT_DATA.noticeMessage;
  state.noticeIssuer=byId('noticeIssuer').value.trim()||DEFAULT_DATA.noticeIssuer;
- persist();toast('保護者向け案内文を保存しました');
-};
+ if(!persist())return false;
+ renderPreflight();
+ toast('配布日・発行者・案内文を保存しました');
+ return true;
+}
+byId('saveNotice').onclick=saveNoticeSettings;
 // Ver.1.49: 他端末がSupabaseへ公開した「お知らせ文面」だけを編集用下書きへ取り込む。
 // 会場・プログラム等は上書きせず、パスコード入力欄も変更しない。
 let noticeFetchBusy=false;
@@ -1830,9 +1838,9 @@ byId('loadPublishedNotice')?.addEventListener('click',async()=>{
  noticeFetchStatus('Supabaseから公開済みの文面を確認しています…');
  try{
   const latest=await read(); // 読み込みのたびに最新データを問い合わせる
-  if(!latest || !['noticeTitle','noticeMessage','noticeIssuer'].every(k=>typeof latest[k]==='string'))
+  if(!latest || !['noticeMessage','noticeIssuer'].every(k=>typeof latest[k]==='string'))
    throw Error('公開済みデータにお知らせ文面がありません。文面を保存し、Supabaseへ公開してください。');
-  const keys=['noticeTitle','noticeMessage','noticeIssuer'];
+  const keys=['noticeMessage','noticeIssuer'];
   const inputs=keys.map(k=>byId(k));
   const inputChanged=keys.some((k,i)=>inputs[i].value!==String(state[k]||''));
   const different=keys.some(k=>String(state[k]||'')!==latest[k]);
@@ -1844,13 +1852,13 @@ byId('loadPublishedNotice')?.addEventListener('click',async()=>{
   const unsavedWarning=inputChanged?'\n※ この画面で編集中の未保存の文章も上書きされます。\n':'';
   const label=latest.updatedAt && !isNaN(new Date(latest.updatedAt).getTime())
    ?`\n公開日時：${new Date(latest.updatedAt).toLocaleString('ja-JP')}`:'';
-  if(!confirm(`Supabaseに公開済みのお知らせ文面を、この端末の下書きに取り込みます。${label}${warning}${unsavedWarning}\n対象：文書タイトル・案内文・発行者の3項目のみ。\n会場・プログラム・パスコードなどは変更しません。\n\n取り込みますか？`)){
+  if(!confirm(`Supabaseに公開済みのお知らせ文面を、この端末の下書きに取り込みます。${label}${warning}${unsavedWarning}\n対象：案内文と発行者。配布日は現在の設定を使います。\n会場・プログラム・パスコードなどは変更しません。\n\n取り込みますか？`)){
    noticeFetchStatus('取り込みを中止しました。');return;
   }
   for(const k of keys) state[k]=latest[k];
   if(!persist())throw Error('端末の下書きを保存できませんでした。容量やブラウザの設定を確認してください。');
   for(let i=0;i<keys.length;i++)inputs[i].value=latest[keys[i]];
-  noticeFetchStatus('公開済みのタイトル・案内文・発行者を取り込み、端末内の下書きに保存しました。その他の設定やパスコードはそのままです。','ok');
+  noticeFetchStatus('公開済みの案内文と発行者を下書きに取り込みました。','ok');
   toast('公開済みのお知らせ文面を取り込みました');
  }catch(error){noticeFetchStatus(`読み込み失敗：${error?.message||error}`,'error');}
  finally{noticeFetchBusy=false;btn.disabled=false;}
@@ -1881,6 +1889,12 @@ byId('printStampSheet').onclick=()=>openStampQrPrint('sheet');
 function jpEventDate(iso){try{const d=new Date(iso+'T00:00:00');return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${'日月火水木金土'[d.getDay()]}）`;}catch(e){return iso}}
 function nl2brText(v){return esc(v).replace(/\n/g,'<br>')}
 byId('printNotice').onclick=()=>{
+ const distributionDate=byId('noticeDistributionDate');
+ if(!distributionDate.value||!distributionDate.checkValidity()){
+  alert('お知らせPDFの右上に記載する配布日を設定してください。');
+  distributionDate.focus();
+  return;
+ }
  const noticePasscode=byId('noticeInternalPasscode').value.trim();
  if(!/^[0-9]{8,24}$/.test(noticePasscode)){
   alert('お知らせPDFに記載する「大豊学園関係者用パスコード」を数字8〜24桁で入力してください。');
@@ -1890,21 +1904,21 @@ byId('printNotice').onclick=()=>{
  if(state.internalPasscode && noticePasscode!==state.internalPasscode){
   if(!confirm('このPDFに記載するパスコードは、この端末の年度設定に保存された値と異なります。実際に関係者入口で有効か確認しましたか？\n\n確認済みの場合のみ「OK」を押してください。'))return;
  }
- byId('saveNotice').click();
+ if(!saveNoticeSettings())return;
  const url=appPublicUrl();
  const qr=new URL('assets/app-qr.png',location.href).href;
  const logo=new URL('assets/ofes-logo.png',location.href).href;
  const w=window.open('','OFES_NOTICE_PDF','width=900,height=1000');
  if(!w){alert('印刷画面を開けませんでした。ポップアップを許可してください。');return;}
- const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${esc(state.noticeTitle)}</title><style>
- @page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP","Yu Gothic",Meiryo,sans-serif;color:#172019;margin:0;font-size:11.2pt;line-height:1.55}h1{font-size:20pt;margin:0 0 5mm;text-align:center}h2{font-size:13.5pt;margin:4mm 0 2mm;border-left:5px solid #197a4b;padding-left:8px}.top{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #197a4b;padding-bottom:4mm;margin-bottom:4mm}.brand{display:flex;align-items:center;gap:10px}.brand img{width:18mm;height:18mm;object-fit:contain}.meta{text-align:right;font-size:9.5pt}.message{background:#f5f8f4;border:1px solid #cfd9d0;border-radius:8px;padding:4mm;margin:3mm 0}.main-grid{display:grid;grid-template-columns:1.6fr .8fr;gap:5mm;align-items:start}.qrbox{text-align:center;border:1px solid #cfd9d0;border-radius:10px;padding:4mm}.qrbox img{width:36mm;height:36mm}.url{font-size:7.5pt;word-break:break-all}.features{margin:1mm 0 0;padding-left:5mm}.features li{margin:1.2mm 0}.install{display:grid;grid-template-columns:1fr 1fr;gap:4mm}.install>div{border:1px solid #cfd9d0;border-radius:8px;padding:3mm}.install ol{margin:1mm 0 0;padding-left:6mm}.note{font-size:8.6pt;color:#526058;margin-top:4mm;border-top:1px solid #d8ddd8;padding-top:3mm}.issuer{text-align:right;margin-top:3mm;font-weight:700}.internal-access-box{border:2px solid #197a4b;border-radius:9px;padding:3mm 4mm;margin:4mm 0;background:#f0f7f1;break-inside:avoid}.internal-access-box strong{display:block;font-size:11pt;color:#164f36}.internal-access-code{font-size:21pt;font-weight:900;letter-spacing:.14em;line-height:1.4;text-align:center;margin:1mm 0;color:#143e2d}.internal-access-box p{margin:1mm 0 0;font-size:9.2pt}@media print{.printbar{display:none}}.printbar{position:fixed;right:12px;top:12px}.printbar button{font-size:16px;padding:10px 18px}
+ const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>OFES 保護者向けお知らせ</title><style>
+ @page{size:A4 portrait;margin:0}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP","Yu Gothic",Meiryo,sans-serif;color:#172019;margin:0;padding:12mm;font-size:11.2pt;line-height:1.55}h2{font-size:13.5pt;margin:4mm 0 2mm;border-left:5px solid #197a4b;padding-left:8px}.top{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #197a4b;padding-bottom:4mm;margin-bottom:4mm}.brand{display:flex;align-items:center;gap:10px}.brand img{width:18mm;height:18mm;object-fit:contain}.meta{text-align:right;font-size:9.5pt;max-width:56%;overflow-wrap:anywhere;white-space:pre-wrap}.message{background:#f5f8f4;border:1px solid #cfd9d0;border-radius:8px;padding:4mm;margin:3mm 0}.main-grid{display:grid;grid-template-columns:1.6fr .8fr;gap:5mm;align-items:start}.qrbox{text-align:center;border:1px solid #cfd9d0;border-radius:10px;padding:4mm}.qrbox img{width:36mm;height:36mm}.url{font-size:7.5pt;word-break:break-all}.features{margin:1mm 0 0;padding-left:5mm}.features li{margin:1.2mm 0}.install{display:grid;grid-template-columns:1fr 1fr;gap:4mm}.install>div{border:1px solid #cfd9d0;border-radius:8px;padding:3mm}.install ol{margin:1mm 0 0;padding-left:6mm}.note{font-size:8.6pt;color:#526058;margin-top:4mm;border-top:1px solid #d8ddd8;padding-top:3mm}.internal-access-box{border:2px solid #197a4b;border-radius:9px;padding:3mm 4mm;margin:4mm 0;background:#f0f7f1;break-inside:avoid}.internal-access-box strong{display:block;font-size:11pt;color:#164f36}.internal-access-code{font-size:21pt;font-weight:900;letter-spacing:.14em;line-height:1.4;text-align:center;margin:1mm 0;color:#143e2d}.internal-access-box p{margin:1mm 0 0;font-size:9.2pt}@media print{.printbar{display:none}}.printbar{position:fixed;right:12px;top:12px}.printbar button{font-size:16px;padding:10px 18px}
  </style></head><body><div class="printbar"><button onclick="window.print()">印刷／PDFとして保存</button></div>
- <div class="top"><div class="brand"><img src="${logo}"><div><strong>OFES - おおフェス</strong><div>保護者の皆様へ</div></div></div><div class="meta">開催日：${jpEventDate(state.eventDate)}<br>${esc(state.noticeIssuer)}</div></div>
- <h1>${esc(state.noticeTitle)}</h1><div class="message">${nl2brText(state.noticeMessage)}</div>
+ <div class="top"><div class="brand"><img src="${logo}"><div><strong>OFES - おおフェス</strong><div>保護者の皆様へ</div></div></div><div class="meta">配布日：${jpEventDate(state.noticeDistributionDate)}<br>${esc(state.noticeIssuer)}</div></div>
+ <div class="message">${nl2brText(state.noticeMessage)}</div>
  <div class="main-grid"><div><h2>OFESアプリでできること</h2><ul class="features"><li><strong>プログラム：</strong>発表時間・発表内容・会場を確認できます。</li><li><strong>会場案内：</strong>学校全体図、前期棟、後期棟から会場を確認できます。</li><li><strong>スタンプラリー：</strong>校内5か所のQRコードを読み取って楽しめます。</li><li><strong>リアクション：</strong>発表への感想を5種類のボタンで届けられます。</li></ul><p><strong>今年度のスローガン：</strong>${esc(state.slogan)}</p></div><div class="qrbox"><strong>OFESはこちら</strong><br><img src="${qr}" alt="OFES QRコード"><div class="url">${esc(url)}</div><small>カメラでQRコードを読み取ってください。</small></div></div>
  <div class="internal-access-box"><strong>大豊学園関係者用パスコード</strong><div class="internal-access-code">${esc(noticePasscode)}</div><p>児童生徒・保護者・学校関係者の方は、最初の画面で<strong style="display:inline">「大豊学園関係者」</strong>を選び、この番号を入力してください。</p></div>
  <h2>スマートフォンのホーム画面に追加する方法</h2><div class="install"><div><strong>iPhone（Safari）</strong><ol><li>QRコードからOFESをSafariで開く</li><li>画面下の「共有」ボタン（□に↑）をタップ</li><li>「ホーム画面に追加」を選ぶ</li><li>「追加」をタップ</li></ol></div><div><strong>Android（Chrome）</strong><ol><li>QRコードからOFESをChromeで開く</li><li>右上の「︙」メニューをタップ</li><li>「ホーム画面に追加」または「アプリをインストール」を選ぶ</li><li>画面の案内に従って追加する</li></ol></div></div>
- <div class="note">※ OFESはWebアプリです。一般来場者は「一般来場者」から利用できます。児童生徒名は一般来場者には表示されません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div><div class="issuer">${esc(state.noticeIssuer)}</div>
+ <div class="note">※ OFESはWebアプリです。一般来場者は「一般来場者」から利用できます。児童生徒名は一般来場者には表示されません。表示にはインターネット接続が必要です。端末やOSのバージョンにより、メニュー名や表示位置が異なる場合があります。</div>
  </body></html>`;
  w.document.open();w.document.write(html);w.document.close();
 };
