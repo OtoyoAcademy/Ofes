@@ -1,13 +1,15 @@
 (()=>{
 'use strict';
 const $=id=>document.getElementById(id);
-const REACTIONS=[['good','👍','よかった'],['learned','💡','なるほど'],['wow','✨','すごい'],['fun','😊','楽しかった'],['support','🙌','応援したい']];
+const REACTIONS=[['good','👍','よかった'],['aha','💡','なるほど'],['amazing','✨','すごい'],['fun','😊','楽しかった'],['cheer','🙌','応援したい']];
 const MAX_PHOTOS=40;
 let photos=[];
 let seed=133;
 let reactionSummary=null;
 let renderBusy=false;
-let lastProgramKey='';
+let previewPending=false;
+let reactionRequest=0;
+let groups=[];
 
 function appData(){
   try{return window.OFESCloud?.exportArchive?.()||null;}catch{return null;}
@@ -30,32 +32,52 @@ function programGroups(){
   }
   return out;
 }
-function selectedGroup(){const key=$('photoProgramSelect')?.value;return programGroups().find(g=>g.key===key)||null;}
+function selectedGroup(){
+  const key=$('photoProgramSelect')?.value;
+  return groups.find(group=>group.key===key)||null;
+}
 function reactionIdsForGroup(group){return [...new Set((group?.programs||[]).filter(p=>p.programKind?['reaction','volunteer'].includes(p.programKind):['s1','s2','s3','s4'].includes(p.session)).map(p=>p.reactionId||p.id).filter(Boolean))];}
-function renderProgramOptions(force=false){
-  const sel=$('photoProgramSelect');if(!sel)return;
-  const groups=programGroups();const current=force?'':sel.value;
-  sel.innerHTML=groups.length?groups.map(g=>`<option value="${esc(g.key)}">${esc(g.label)}</option>`).join(''):'<option value="">プログラムがありません</option>';
-  if(current&&groups.some(g=>g.key===current))sel.value=current;
-  else if(groups.length)sel.value=groups[0].key;
-  if(force||!$('photoSheetTitle')?.value){const g=selectedGroup();if($('photoSheetTitle'))$('photoSheetTitle').value=g?.title||'';}
-  lastProgramKey=sel.value;
+function renderProgramOptions(){
+  const select=$('photoProgramSelect');
+  if(!select)return;
+  const current=select.value;
+  const programs=programGroups();
+  const grades=(window.OFESPhotoReactions?.gradeOptions?.()||[]).map(({grade,targetCount})=>({
+    key:`grade:${grade}`,grade,label:`${grade}（${targetCount}発表）`,title:`${grade}の発表`,
+  }));
+  groups=[...grades,...programs];
+  const options=list=>list.map(g=>`<option value="${esc(g.key)}">${esc(g.label)}</option>`).join('');
+  select.innerHTML=groups.length
+    ? (grades.length?`<optgroup label="学年まとめ">${options(grades)}</optgroup>`:'')
+      +(programs.length?`<optgroup label="プログラム・既存のまとめ">${options(programs)}</optgroup>`:'')
+    : '<option value="">集計対象がありません</option>';
+  select.value=groups.some(g=>g.key===current)?current:(programs[0]?.key||grades[0]?.key||'');
+  const title=$('photoSheetTitle');
+  if(title&&(!title.value||current!==select.value))title.value=selectedGroup()?.title||'';
 }
 async function refreshReactions(){
-  const status=$('photoReactionStatus'),group=selectedGroup();reactionSummary=null;
-  if(!group){if(status)status.textContent='プログラムを選択してください。';renderPreview();return null;}
+  const status=$('photoReactionStatus'),group=selectedGroup();
+  const request=++reactionRequest;
+  reactionSummary=null;
+  renderPreview();
+  const setStatus=message=>{if(status)status.textContent=message;};
+  if(!group){setStatus('まとめる対象を選んでください。');return null;}
+  if(!$('photoShowReactions')?.checked){setStatus('リアクション表示はオフです。');return null;}
   const ids=reactionIdsForGroup(group);
-  if(!$('photoShowReactions')?.checked){if(status)status.textContent='リアクション表示はオフです。';renderPreview();return null;}
-  if(!ids.length){if(status)status.textContent='このプログラムにはリアクション対象の発表がありません。';renderPreview();return null;}
-  if(!window.OFESPhotoReactions?.collect){if(status)status.textContent='Supabaseの集計機能を準備しています。管理者ログイン後にもう一度お試しください。';renderPreview();return null;}
+  if(!group.grade&&!ids.length){setStatus('このプログラムにはリアクション対象の発表がありません。');return null;}
+  if(!window.OFESPhotoReactions?.collect){setStatus('Supabaseの集計機能を準備しています。管理者ログイン後にもう一度お試しください。');return null;}
+  setStatus('Supabaseからリアクションを集計しています…');
   try{
-    if(status)status.textContent='Supabaseからリアクションを集計しています…';
-    reactionSummary=await window.OFESPhotoReactions.collect(ids);
-    if(status)status.textContent=`リアクションを取得しました（対象${reactionSummary.targetCount||ids.length}発表）。`;
-    await renderPreview();return reactionSummary;
+    const summary=await window.OFESPhotoReactions.collect(ids,group.grade??null);
+    if(request!==reactionRequest)return null;
+    reactionSummary=summary;
+    const totals=REACTIONS.map(([key,emoji])=>`${emoji} ${summary.counts[key]||0}`).join('　');
+    setStatus(`${group.grade?group.grade+'の合計（':'リアクションを取得しました（'}${summary.targetCount}発表）　${totals}`);
+    renderPreview();
+    return summary;
   }catch(err){
-    if(status)status.textContent=`リアクションを取得できませんでした：${err?.message||err}`;
-    reactionSummary=null;await renderPreview();return null;
+    if(request===reactionRequest)setStatus(`リアクションを取得できませんでした：${err?.message||err}`);
+    return null;
   }
 }
 
@@ -142,54 +164,88 @@ function drawCover(ctx,img,x,y,w,h){const ir=img.width/img.height,rr=w/h;let sx=
 function fitText(ctx,text,maxWidth,start,min=28){let s=start;while(s>min){ctx.font=`800 ${s}px "Noto Sans JP","Yu Gothic",sans-serif`;if(ctx.measureText(text).width<=maxWidth)break;s-=2;}return s;}
 function topReactionText(sum){if(!sum?.counts)return'';const max=Math.max(...REACTIONS.map(([k])=>Number(sum.counts[k]||0)));if(max<=0)return'';const names=REACTIONS.filter(([k])=>Number(sum.counts[k]||0)===max).map(([,e,n])=>`${e} ${n}`);return `多く届いたリアクション：${names.join('・')}`;}
 async function drawCollage(canvas,full=false){
-  if(renderBusy&&!full)return;renderBusy=true;
-  try{
-    const W=full?3508:1400,H=full?2480:990;canvas.width=W;canvas.height=H;const ctx=canvas.getContext('2d',{alpha:false});
-    ctx.fillStyle='#f7f5ef';ctx.fillRect(0,0,W,H);const scale=W/3508;
-    const margin=full?110:44,titleY=full?95:38,titleH=full?245:98;
-    const title=($('photoSheetTitle')?.value||selectedGroup()?.title||'OFES 写真記録').trim();const data=appData();
-    ctx.fillStyle='#1c5c3c';ctx.font=`800 ${full?40:16}px "Noto Sans JP","Yu Gothic",sans-serif`;ctx.fillText(`OFES ${data?.year||''}年度`,margin,titleY);
-    ctx.fillStyle='#172019';const fs=fitText(ctx,title,W-margin*2,full?82:33,full?46:19);ctx.font=`900 ${fs}px "Noto Sans JP","Yu Gothic",sans-serif`;ctx.fillText(title,margin,titleY+(full?92:37));
-    ctx.strokeStyle='#2f7b56';ctx.lineWidth=full?7:3;ctx.beginPath();ctx.moveTo(margin,titleY+(full?145:58));ctx.lineTo(W-margin,titleY+(full?145:58));ctx.stroke();
-    const showR=$('photoShowReactions')?.checked&&reactionSummary;const reactionH=showR?(full?230:92):(full?90:36);
-    const contentX=margin,contentY=titleY+titleH,contentW=W-margin*2,contentH=H-contentY-reactionH-(full?70:28);
-    if(!photos.length){ctx.fillStyle='#fff';roundedRect(ctx,contentX,contentY,contentW,contentH,full?28:12);ctx.fill();ctx.strokeStyle='#cfd9d0';ctx.lineWidth=full?4:2;ctx.stroke();ctx.fillStyle='#6a746d';ctx.textAlign='center';ctx.font=`700 ${full?50:20}px sans-serif`;ctx.fillText('写真を選ぶと、ここにプレビューが表示されます。',W/2,contentY+contentH/2);ctx.textAlign='left';return;}
-    const rng=rngFactory(seed),order=photoOrder(rng),preset=$('photoLayoutPreset')?.value||'auto',rects=layoutRects(order.length,preset,contentW,contentH,rng);
-    for(let i=0;i<order.length;i++){
-      const p=order[i],r=rects[i];if(!r)continue;let img;try{img=await loadImg(p.printUrl);}catch{continue;}
-      const x=contentX+r.x,y=contentY+r.y,w=r.w,h=r.h,rot=(r.rot||0)*Math.PI/180;
-      ctx.save();ctx.translate(x+w/2,y+h/2);ctx.rotate(rot);const bx=-w/2,by=-h/2;
-      ctx.shadowColor='rgba(0,0,0,.18)';ctx.shadowBlur=full?18:7;ctx.shadowOffsetY=full?7:3;ctx.fillStyle='#fff';roundedRect(ctx,bx-(full?12:5),by-(full?12:5),w+(full?24:10),h+(full?24:10),full?18:8);ctx.fill();ctx.shadowColor='transparent';
-      roundedRect(ctx,bx,by,w,h,full?12:5);ctx.clip();drawCover(ctx,img,bx,by,w,h);ctx.restore();
-      if(p.main){ctx.save();ctx.fillStyle='#1f754f';ctx.beginPath();ctx.arc(x+w-(full?30:12),y+(full?30:12),full?24:10,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`900 ${full?28:11}px sans-serif`;ctx.fillText('★',x+w-(full?30:12),y+(full?31:12));ctx.restore();}
-    }
-    if(showR){
-      const y=H-reactionH+(full?25:10);ctx.fillStyle='#fff';roundedRect(ctx,margin,y,W-margin*2,reactionH-(full?40:16),full?24:10);ctx.fill();ctx.strokeStyle='#d3ddd5';ctx.lineWidth=full?3:1;ctx.stroke();
-      ctx.fillStyle='#345946';ctx.font=`800 ${full?32:13}px "Noto Sans JP","Yu Gothic",sans-serif`;ctx.fillText('みんなのリアクション',margin+(full?36:14),y+(full?58:23));
-      let x=margin+(full?430:172);const step=(W-margin*2-(full?500:200))/REACTIONS.length;
-      for(const [k,e] of REACTIONS){ctx.font=`700 ${full?44:18}px sans-serif`;ctx.fillText(e,x,y+(full?60:24));ctx.font=`900 ${full?38:15}px sans-serif`;ctx.fillStyle='#172019';ctx.fillText(String(reactionSummary.counts?.[k]||0),x+(full?58:23),y+(full?60:24));ctx.fillStyle='#345946';x+=step;}
-      if($('photoShowTopReaction')?.checked){const txt=topReactionText(reactionSummary);if(txt){ctx.fillStyle='#6b746e';ctx.font=`700 ${full?27:11}px "Noto Sans JP","Yu Gothic",sans-serif`;ctx.fillText(txt,margin+(full?36:14),y+(full?125:50));}}
-    }
-  }finally{renderBusy=false;}
+  const group=selectedGroup();
+  const summary=$('photoShowReactions')?.checked?reactionSummary:null;
+  const showTop=$('photoShowTopReaction')?.checked;
+  const W=full?3508:1400,H=full?2480:990;canvas.width=W;canvas.height=H;const ctx=canvas.getContext('2d',{alpha:false});
+  ctx.fillStyle='#f7f5ef';ctx.fillRect(0,0,W,H);
+  const margin=full?110:44,titleY=full?95:38,titleH=full?245:98;
+  const title=($('photoSheetTitle')?.value||group?.title||'OFES 写真記録').trim();const data=appData();
+  ctx.fillStyle='#1c5c3c';ctx.font=`800 ${full?40:16}px "Noto Sans JP","Yu Gothic",sans-serif`;ctx.fillText(`OFES ${data?.year||''}年度`,margin,titleY);
+  ctx.fillStyle='#172019';const fs=fitText(ctx,title,W-margin*2,full?82:33,full?46:19);ctx.font=`900 ${fs}px "Noto Sans JP","Yu Gothic",sans-serif`;ctx.fillText(title,margin,titleY+(full?92:37));
+  ctx.strokeStyle='#2f7b56';ctx.lineWidth=full?7:3;ctx.beginPath();ctx.moveTo(margin,titleY+(full?145:58));ctx.lineTo(W-margin,titleY+(full?145:58));ctx.stroke();
+  const reactionH=summary?(full?230:92):(full?90:36);
+  const contentX=margin,contentY=titleY+titleH,contentW=W-margin*2,contentH=H-contentY-reactionH-(full?70:28);
+  if(!photos.length){ctx.fillStyle='#fff';roundedRect(ctx,contentX,contentY,contentW,contentH,full?28:12);ctx.fill();ctx.strokeStyle='#cfd9d0';ctx.lineWidth=full?4:2;ctx.stroke();ctx.fillStyle='#6a746d';ctx.textAlign='center';ctx.font=`700 ${full?50:20}px sans-serif`;ctx.fillText('写真を選ぶと、ここにプレビューが表示されます。',W/2,contentY+contentH/2);ctx.textAlign='left';return;}
+  const rng=rngFactory(seed),order=photoOrder(rng),preset=$('photoLayoutPreset')?.value||'auto',rects=layoutRects(order.length,preset,contentW,contentH,rng);
+  for(let i=0;i<order.length;i++){
+    const p=order[i],r=rects[i];if(!r)continue;let img;try{img=await loadImg(p.printUrl);}catch{continue;}
+    const x=contentX+r.x,y=contentY+r.y,w=r.w,h=r.h,rot=(r.rot||0)*Math.PI/180;
+    ctx.save();ctx.translate(x+w/2,y+h/2);ctx.rotate(rot);const bx=-w/2,by=-h/2;
+    ctx.shadowColor='rgba(0,0,0,.18)';ctx.shadowBlur=full?18:7;ctx.shadowOffsetY=full?7:3;ctx.fillStyle='#fff';roundedRect(ctx,bx-(full?12:5),by-(full?12:5),w+(full?24:10),h+(full?24:10),full?18:8);ctx.fill();ctx.shadowColor='transparent';
+    roundedRect(ctx,bx,by,w,h,full?12:5);ctx.clip();drawCover(ctx,img,bx,by,w,h);ctx.restore();
+    if(p.main){ctx.save();ctx.fillStyle='#1f754f';ctx.beginPath();ctx.arc(x+w-(full?30:12),y+(full?30:12),full?24:10,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`900 ${full?28:11}px sans-serif`;ctx.fillText('★',x+w-(full?30:12),y+(full?31:12));ctx.restore();}
+  }
+  if(summary){
+    const y=H-reactionH+(full?25:10);ctx.fillStyle='#fff';roundedRect(ctx,margin,y,W-margin*2,reactionH-(full?40:16),full?24:10);ctx.fill();ctx.strokeStyle='#d3ddd5';ctx.lineWidth=full?3:1;ctx.stroke();
+    ctx.fillStyle='#345946';ctx.font=`800 ${full?32:13}px "Noto Sans JP","Yu Gothic",sans-serif`;ctx.fillText(group?.grade?'学年のリアクション':'みんなのリアクション',margin+(full?36:14),y+(full?58:23));
+    let x=margin+(full?430:172);const step=(W-margin*2-(full?500:200))/REACTIONS.length;
+    for(const [k,e] of REACTIONS){ctx.font=`700 ${full?44:18}px sans-serif`;ctx.fillText(e,x,y+(full?60:24));ctx.font=`900 ${full?38:15}px sans-serif`;ctx.fillStyle='#172019';ctx.fillText(String(summary.counts?.[k]||0),x+(full?58:23),y+(full?60:24));ctx.fillStyle='#345946';x+=step;}
+    if(showTop){const txt=topReactionText(summary);if(txt){ctx.fillStyle='#6b746e';ctx.font=`700 ${full?27:11}px "Noto Sans JP","Yu Gothic",sans-serif`;ctx.fillText(txt,margin+(full?36:14),y+(full?125:50));}}
+  }
 }
-async function renderPreview(){const c=$('photoCollagePreview');if(!c)return;try{await drawCollage(c,false);}catch(err){const s=$('photoOutputStatus');if(s)s.textContent=`プレビューを作成できませんでした：${err?.message||err}`;}}
+async function renderPreview(){
+  const canvas=$('photoCollagePreview');
+  if(!canvas)return;
+  previewPending=true;
+  if(renderBusy)return;
+  renderBusy=true;
+  try{
+    while(previewPending){
+      previewPending=false;
+      await drawCollage(canvas);
+    }
+  }catch(err){
+    const status=$('photoOutputStatus');
+    if(status)status.textContent=`プレビューを作成できませんでした：${err?.message||err}`;
+  }finally{
+    renderBusy=false;
+  }
+}
 async function printPdf(){
   if(photos.length<1){alert('先に写真を選んでください。');return;}
-  const btn=$('photoPrintPdf'),status=$('photoOutputStatus');btn.disabled=true;try{
-    if($('photoShowReactions')?.checked)await refreshReactions();
-    if(status)status.textContent='A4横の高解像度データを作成しています…';const c=document.createElement('canvas');await drawCollage(c,true);const dataUrl=c.toDataURL('image/jpeg',.95);
-    const title=($('photoSheetTitle')?.value||'OFES 写真記録').trim();const w=window.open('','OFES_PHOTO_PDF','width=1200,height=900');if(!w)throw new Error('印刷画面を開けませんでした。ポップアップを許可してください。');
+  const btn=$('photoPrintPdf'),status=$('photoOutputStatus');
+  const group=selectedGroup();
+  const showReactions=$('photoShowReactions')?.checked;
+  let w;
+  btn.disabled=true;
+  try{
+    w=window.open('','_blank','width=1200,height=900');
+    if(!w)throw new Error('印刷画面を開けませんでした。ポップアップを許可してください。');
+    w.document.body.textContent='写真コラージュを準備しています…';
+    const summary=showReactions?await refreshReactions():null;
+    if(group?.key!==selectedGroup()?.key||showReactions!==$('photoShowReactions')?.checked){
+      throw new Error('出力する設定が変更されました。もう一度PDF出力してください。');
+    }
+    if(group?.grade&&showReactions&&!summary){
+      throw new Error('学年のリアクションを取得できませんでした。集計欄の表示を確認してから再度お試しください。');
+    }
+    if(status)status.textContent='A4横の高解像度データを作成しています…';
+    const title=($('photoSheetTitle')?.value||group?.title||'OFES 写真記録').trim();
+    const c=document.createElement('canvas');
+    await drawCollage(c,true);
+    const dataUrl=c.toDataURL('image/jpeg',.95);
     w.document.open();w.document.write(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:0}*{box-sizing:border-box}html,body{margin:0;background:#ddd;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP","Yu Gothic",sans-serif}.sheet{width:297mm;height:210mm;margin:0 auto;background:#fff}.sheet img{display:block;width:297mm;height:210mm;object-fit:contain}.bar{position:fixed;z-index:10;right:14px;top:14px;display:flex;gap:8px}.bar button{padding:11px 16px;font-size:15px;border:1px solid #aaa;border-radius:9px;background:#fff;font-weight:800}@media print{html,body{background:#fff}.bar{display:none}.sheet{margin:0}}</style></head><body><div class="bar"><button onclick="window.print()">印刷／PDFとして保存</button></div><div class="sheet"><img src="${dataUrl}" alt="${esc(title)}"></div></body></html>`);w.document.close();
     if(status)status.textContent='印刷画面を開きました。用紙サイズA4・横向きで「PDFとして保存」を選んでください。';
     setTimeout(()=>{if(confirm('印刷画面を開きました。次の用紙作成のため、この画面の写真をリセットしますか？'))resetPhotos();},250);
-  }catch(err){if(status)status.textContent=`PDFを作成できませんでした：${err?.message||err}`;alert(err?.message||err);}finally{btn.disabled=false;}
+  }catch(err){w?.close();if(status)status.textContent=`PDFを作成できませんでした：${err?.message||err}`;alert(err?.message||err);}finally{btn.disabled=false;}
 }
 
 function bind(){
-  renderProgramOptions(true);renderThumbs(false);renderPreview();
-  $('photoProgramSelect')?.addEventListener('change',()=>{const g=selectedGroup();if($('photoSheetTitle'))$('photoSheetTitle').value=g?.title||'';reactionSummary=null;lastProgramKey=$('photoProgramSelect').value;refreshReactions();});
+  renderProgramOptions();renderThumbs(false);renderPreview();
+  $('photoProgramSelect')?.addEventListener('change',()=>{const g=selectedGroup();if($('photoSheetTitle'))$('photoSheetTitle').value=g?.title||'';refreshReactions();});
   $('photoSheetTitle')?.addEventListener('input',()=>renderPreview());
-  $('photoShowReactions')?.addEventListener('change',()=>{if($('photoShowReactions').checked)refreshReactions();else{reactionSummary=null;renderPreview();}});
+  $('photoShowReactions')?.addEventListener('change',refreshReactions);
   $('photoShowTopReaction')?.addEventListener('change',()=>renderPreview());
   $('photoRefreshReactions')?.addEventListener('click',refreshReactions);
   $('photoPickerSd')?.addEventListener('change',e=>{addFiles(e.target.files);e.target.value='';});
@@ -202,7 +258,14 @@ function bind(){
   $('photoPrintPdf')?.addEventListener('click',printPdf);
   $('photoThumbGrid')?.addEventListener('click',e=>{const m=e.target.closest('[data-photo-main]'),r=e.target.closest('[data-photo-remove]');if(m)toggleMain(m.dataset.photoMain);if(r)removePhoto(r.dataset.photoRemove);});
   const dz=$('photoDropZone');if(dz){for(const ev of ['dragenter','dragover'])dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('dragover');});for(const ev of ['dragleave','drop'])dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('dragover');});dz.addEventListener('drop',e=>addFiles(e.dataTransfer.files));}
-  const nav=document.querySelector('#adminNav [data-admin="photos"]');nav?.addEventListener('click',()=>{renderProgramOptions(false);if(lastProgramKey!==$('photoProgramSelect')?.value){lastProgramKey=$('photoProgramSelect')?.value;reactionSummary=null;}renderPreview();});
+  const nav=document.querySelector('#adminNav [data-admin="photos"]');
+  const refreshOptions=()=>{
+    if(!nav?.classList.contains('active'))return;
+    renderProgramOptions();
+    refreshReactions();
+  };
+  nav?.addEventListener('click',refreshOptions);
+  window.addEventListener('ofes-cloud-published',refreshOptions);
   window.addEventListener('beforeunload',()=>photos.forEach(revokePhoto));
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind);else bind();

@@ -385,7 +385,16 @@ async function restoreCachedReactions(){
 function isReactionTargetProgram(p){if(!p||/^(?:移動(?:時間|中|準備)?|会場移動(?:準備)?|校内移動|校舎間移動)(?:$|[\s（(【「:：・/／→-])/.test(String(p.title||'').normalize('NFKC').trim()))return false;return p.programKind?['reaction','volunteer'].includes(p.programKind):['s1','s2','s3','s4'].includes(p.session);}
 function sessionText(p){if(['s1','s2','s3','s4'].includes(p.session)){const d=publishedData?.sessions?.[p.session];return d?.label||({s1:'セッション①',s2:'セッション②',s3:'セッション③',s4:'セッション④'}[p.session]||p.session);}return p.session==='afternoon'?'午後':'その他';}
 function zoneText(p){return publishedData?.zones?.find(z=>z.id===p.zoneId)?.name||(p.zoneId||'会場未設定');}
-function gradeLabels(gradeText){const text=String(gradeText||'').trim();const nums=[...new Set((text.match(/\d+/g)||[]).map(Number).filter(n=>n>=1&&n<=9))].sort((a,b)=>a-b);return nums.length?nums.map(n=>`${n}年生`):[text||'全体・その他'];}
+function gradeLabels(gradeText){
+  const text=String(gradeText||'').trim();
+  const numbers=new Set();
+  const ranges=/(?<!\d)([1-9])(?!\d)(?:\s*年(?:生)?)?(?:\s*[-~〜–—]\s*([1-9])(?!\d))?/g;
+  for(const [,first,last] of text.normalize('NFKC').matchAll(ranges)){
+    const start=Number(first),end=Number(last||first);
+    for(let grade=Math.min(start,end);grade<=Math.max(start,end);grade++)numbers.add(grade);
+  }
+  return numbers.size?[...numbers].sort((a,b)=>a-b).map(n=>`${n}年生`):[text||'全体・その他'];
+}
 function gradeOrder(label){const m=String(label).match(/^(\d+)年生$/);return m?Number(m[1]):99;}
 function reactionTargetGroups(){
   const map=new Map();
@@ -401,28 +410,61 @@ function renderReactionStatsOptions(){
   const groups=reactionTargetGroups();
   select.innerHTML=groups.length?groups.map(g=>{const p=g.representative;return `<option value="${String(g.reactionId).replace(/"/g,'&quot;')}">${p.grade?`${p.grade} `:''}${p.group?`${p.group} `:''}${p.title}（${g.programs.length>1?`${g.programs.length}回実施`:`${sessionText(p)} ${p.start}〜${p.end}`}）</option>`}).join(''):'<option value="">集計対象の発表がありません</option>';
 }
-async function collectOneTarget(group){
-  const { data:votes, error }=await supabase.from('ofes_reaction_votes').select('selected,voter_uid').eq('event_date',publishedData.eventDate).eq('program_id',group.reactionId);if(error)throw error;
+async function collectOneTarget(group,eventDate=publishedData.eventDate){
+  const pageSize=500;
   const counts=Object.fromEntries(REACTION_KEYS.map(k=>[k,0]));
-  for(const row of votes||[])for(const key of (Array.isArray(row.selected)?row.selected:[]))if(key in counts)counts[key]++;
+  let respondents=0;
+  let lastVoter;
+  while(true){
+    let query=supabase.from('ofes_reaction_votes').select('selected,voter_uid').eq('event_date',eventDate).eq('program_id',group.reactionId).order('voter_uid').limit(pageSize);
+    if(lastVoter)query=query.gt('voter_uid',lastVoter);
+    const {data,error}=await query;
+    if(error)throw error;
+    const votes=data||[];
+    for(const row of votes)for(const key of (Array.isArray(row.selected)?row.selected:[]))if(REACTION_KEYS.includes(key))counts[key]++;
+    respondents+=votes.length;
+    if(votes.length<pageSize)break;
+    lastVoter=votes.at(-1).voter_uid;
+  }
   const p=group.representative;
   const schedules=group.programs.slice().sort((a,b)=>String(a.start).localeCompare(String(b.start))).map(x=>`${sessionText(x)} ${x.start}〜${x.end}`);
   const zones=[...new Set(group.programs.map(zoneText))];
-  return {reactionId:group.reactionId,title:p.title,grade:p.grade||'全体・その他',gradeLabels:gradeLabels(p.grade),groupName:p.group||'（グループ名なし）',counts,respondents:(votes||[]).length,schedules,zoneName:zones.join('／')};
+  return {reactionId:group.reactionId,title:p.title,grade:p.grade||'全体・その他',gradeLabels:gradeLabels(p.grade),groupName:p.group||'（グループ名なし）',counts,respondents,schedules,zoneName:zones.join('／')};
 }
 
-// Ver.1.33: 写真コラージュから既存のリアクション集計を利用するための管理者向けAPI。
+function photoTargetsByGrade(groups){
+  const byGrade=new Map();
+  for(const group of groups){
+    const grades=new Set(group.programs.flatMap(p=>gradeLabels(p.grade)));
+    for(const grade of grades){
+      if(!byGrade.has(grade))byGrade.set(grade,[]);
+      byGrade.get(grade).push(group);
+    }
+  }
+  return byGrade;
+}
+
 window.OFESPhotoReactions={
-  collect:async(reactionIds)=>{
+  gradeOptions(){
+    return [...photoTargetsByGrade(reactionTargetGroups())]
+      .sort(([a],[b])=>gradeOrder(a)-gradeOrder(b)||a.localeCompare(b,'ja'))
+      .map(([grade,groups])=>({grade,targetCount:groups.length}));
+  },
+  async collect(reactionIds,grade=null){
     if(!isAdmin())throw Error('Supabaseの管理者ログインが必要です。');
-    if(!publishedData?.eventDate)throw Error('Supabaseの公開データがありません。先に公開データを確認してください。');
-    const ids=[...new Set((Array.isArray(reactionIds)?reactionIds:[]).map(String).filter(Boolean))];
-    const groups=reactionTargetGroups().filter(g=>ids.includes(String(g.reactionId)));
+    const eventDate=publishedData?.eventDate;
+    if(!eventDate)throw Error('Supabaseの公開データがありません。先に公開データを確認してください。');
+    const publishedGroups=reactionTargetGroups();
+    const ids=new Set((Array.isArray(reactionIds)?reactionIds:[]).map(String).filter(Boolean));
+    const groups=grade===null
+      ?publishedGroups.filter(g=>ids.has(String(g.reactionId)))
+      :photoTargetsByGrade(publishedGroups).get(grade)||[];
     if(!groups.length)throw Error('公開済みデータに対応するリアクション対象発表がありません。');
-    const items=[];for(const g of groups)items.push(await collectOneTarget(g));
+    const items=[];
+    for(const group of groups)items.push(await collectOneTarget(group,eventDate));
     const counts=Object.fromEntries(REACTION_KEYS.map(k=>[k,0]));
-    for(const item of items)for(const k of REACTION_KEYS)counts[k]+=Number(item.counts?.[k]||0);
-    return {counts,respondents:items.reduce((n,x)=>n+Number(x.respondents||0),0),targetCount:items.length,items};
+    for(const item of items)for(const key of REACTION_KEYS)counts[key]+=item.counts[key];
+    return {counts,respondents:items.reduce((n,x)=>n+x.respondents,0),targetCount:items.length,items};
   }
 };
 
